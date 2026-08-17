@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "532676805365",
+    "project_id": "leaderschool-6b86f",
+    "storage_bucket": "leaderschool-6b86f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:532676805365:android:6505d39102fdf9aeee7bbc",
+        "android_client_info": {
+          "package_name": "com.example.leader_school"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpT7UOVkiiwm3E4kPijrWhm3SJYQf8NYc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
