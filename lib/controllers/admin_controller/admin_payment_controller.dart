@@ -87,6 +87,28 @@ class AdminPaymentsController extends GetxController {
     }
   }
 
+  // =========================================================================
+// YANGI METOD — buni AdminPaymentsController klassi ICHIGA qo'shing
+// (masalan lockPaymentsInRange metodidan keyin). Butun faylni emas,
+// FAQAT shu metodni qo'shing.
+// =========================================================================
+
+  /// Excel hisoboti uchun — tanlangan davrdagi BARCHA to'lovlarni
+  /// (limit(50) CHEKLOVISIZ) 'payments_feed'dan o'qiydi.
+  Future<List<PaymentRecord>> fetchPaymentsInRange({
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final snap = await _db
+        .collection('payments_feed')
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+        .where('date', isLessThanOrEqualTo: Timestamp.fromDate(end))
+        .orderBy('date', descending: false)
+        .get();
+
+    return snap.docs.map((doc) => PaymentRecord.fromDoc(doc.id, doc.data())).toList();
+  }
+
   Future<void> refresh() => _fetchPayments();
 
   // =======================================================================

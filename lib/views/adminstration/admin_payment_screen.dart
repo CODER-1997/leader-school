@@ -1,8 +1,9 @@
- import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 
 import '../../controllers/admin_controller/admin_payment_controller.dart';
+import '../../services/excel_report_service.dart';
 import '../../services/get_helper.dart';
 
 
@@ -69,7 +70,7 @@ class AdminPaymentsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  _lockOptionTile(
+                  _optionTile(
                     icon: Icons.calendar_month_rounded,
                     label: "Joriy oy",
                     onTap: () {
@@ -78,7 +79,7 @@ class AdminPaymentsScreen extends StatelessWidget {
                     },
                   ),
                   const SizedBox(height: 8),
-                  _lockOptionTile(
+                  _optionTile(
                     icon: Icons.today_rounded,
                     label: "Oxirgi 3 kun",
                     onTap: () {
@@ -87,7 +88,7 @@ class AdminPaymentsScreen extends StatelessWidget {
                     },
                   ),
                   const SizedBox(height: 8),
-                  _lockOptionTile(
+                  _optionTile(
                     icon: Icons.date_range_rounded,
                     label: customStart == null
                         ? "Boshqa davr tanlash..."
@@ -138,7 +139,140 @@ class AdminPaymentsScreen extends StatelessWidget {
     );
   }
 
-  Widget _lockOptionTile({required IconData icon, required String label, required VoidCallback onTap}) {
+  // YANGI: Excel hisobot uchun davr tanlash — "Davrni yopish" bilan bir
+  // xil uslubda, lekin qulflash o'rniga hisobot yaratib ulashadi.
+  Future<void> _showExcelReportDialog(BuildContext context, AdminPaymentsController controller) async {
+    DateTime? customStart;
+    DateTime? customEnd;
+    bool isGenerating = false;
+
+    await Get.dialog(
+      StatefulBuilder(
+        builder: (context, setState) {
+          Future<void> runExport(DateTime start, DateTime end) async {
+            setState(() => isGenerating = true);
+            try {
+              final endOfDay = DateTime(end.year, end.month, end.day, 23, 59, 59);
+              final payments = await controller.fetchPaymentsInRange(start: start, end: endOfDay);
+
+              if (payments.isEmpty) {
+                Get.snackbar("Diqqat", "Tanlangan davrda to'lov topilmadi", backgroundColor: Colors.orange, colorText: Colors.white);
+                setState(() => isGenerating = false);
+                return;
+              }
+
+              await ExcelReportService.generateAndShare(payments: payments, start: start, end: endOfDay);
+
+              Get.back();
+              Get.snackbar("Tayyor", "${payments.length} ta to'lov bo'yicha hisobot yaratildi",
+                  backgroundColor: const Color(0xFF10B981), colorText: Colors.white);
+            } catch (e) {
+              Get.snackbar("Xatolik", "Hisobot yaratishda xato: $e", backgroundColor: Colors.red, colorText: Colors.white);
+              setState(() => isGenerating = false);
+            }
+          }
+
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(color: const Color(0xFF10B981).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                        child: const Icon(Icons.grid_on_rounded, color: Color(0xFF10B981), size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(child: Text("Excel hisobot", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF0F172A)))),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    "Tanlangan davr bo'yicha batafsil hisobot (Xulosa, Kunlik taqsimot, Tafsilotlar) Excel faylida yaratiladi.",
+                    style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B), height: 1.4),
+                  ),
+                  const SizedBox(height: 20),
+
+                  if (isGenerating)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 20),
+                      child: Center(child: CircularProgressIndicator(color: Color(0xFF10B981))),
+                    )
+                  else ...[
+                    _optionTile(
+                      icon: Icons.calendar_month_rounded,
+                      label: "Joriy oy",
+                      onTap: () {
+                        final now = DateTime.now();
+                        runExport(DateTime(now.year, now.month, 1), DateTime(now.year, now.month + 1, 0));
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _optionTile(
+                      icon: Icons.event_repeat_rounded,
+                      label: "Oxirgi 3 oy",
+                      onTap: () {
+                        final now = DateTime.now();
+                        runExport(DateTime(now.year, now.month - 3, 1), now);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _optionTile(
+                      icon: Icons.date_range_rounded,
+                      label: customStart == null
+                          ? "Boshqa davr tanlash..."
+                          : "${DateFormat('dd.MM').format(customStart!)} – ${customEnd != null ? DateFormat('dd.MM').format(customEnd!) : '...'}",
+                      onTap: () async {
+                        final range = await showDateRangePicker(
+                          context: context,
+                          firstDate: DateTime(2023),
+                          lastDate: DateTime(2030),
+                        );
+                        if (range != null) {
+                          setState(() {
+                            customStart = range.start;
+                            customEnd = range.end;
+                          });
+                        }
+                      },
+                    ),
+
+                    if (customStart != null && customEnd != null) ...[
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 46,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
+                          onPressed: () => runExport(customStart!, customEnd!),
+                          icon: const Icon(Icons.download_rounded, size: 18, color: Colors.white),
+                          label: const Text("Hisobotni yaratish", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(onPressed: () => Get.back(), child: const Text("Bekor qilish", style: TextStyle(color: Color(0xFF94A3B8)))),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _optionTile({required IconData icon, required String label, required VoidCallback onTap}) {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: onTap,
@@ -202,32 +336,50 @@ class AdminPaymentsScreen extends StatelessWidget {
             ),
 
             const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              height: 46,
-              child: Obx(() => OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Color(0xFFD97706)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            // YANGI: ikkita tugma bir qatorda — Excel hisobot va Davrni yopish
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 46,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFF10B981)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () => _showExcelReportDialog(context, controller),
+                      icon: const Icon(Icons.grid_on_rounded, size: 16, color: Color(0xFF10B981)),
+                      label: const Text("Excel hisobot", style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 12.5)),
+                    ),
+                  ),
                 ),
-                onPressed: controller.isLocking.value ? null : () => _showLockPeriodDialog(context, controller),
-                icon: controller.isLocking.value
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFD97706)))
-                    : const Icon(Icons.lock_clock_rounded, size: 18, color: Color(0xFFD97706)),
-                label: Text(
-                  controller.isLocking.value ? "Qulflanmoqda..." : "Davrni yopish (qulflash)",
-                  style: const TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.bold, fontSize: 13.5),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SizedBox(
+                    height: 46,
+                    child: Obx(() => OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFFD97706)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: controller.isLocking.value ? null : () => _showLockPeriodDialog(context, controller),
+                      icon: controller.isLocking.value
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFD97706)))
+                          : const Icon(Icons.lock_clock_rounded, size: 16, color: Color(0xFFD97706)),
+                      label: Text(
+                        controller.isLocking.value ? "..." : "Qulflash",
+                        style: const TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.bold, fontSize: 12.5),
+                      ),
+                    )),
+                  ),
                 ),
-              )),
+              ],
             ),
 
             const SizedBox(height: 20),
             const Text("So'nggi to'lovlar", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A))),
             const SizedBox(height: 12),
 
-            // YANGI: xato bo'lsa — nima uchun bo'sh ekanini ANIQ ko'rsatamiz
-            // (avval bu holat "Hozircha to'lovlar topilmadi" bilan bir xil
-            // ko'rinib, sababni bilib bo'lmasdi).
             if (controller.errorMessage.value != null)
               Container(
                 padding: const EdgeInsets.all(16),

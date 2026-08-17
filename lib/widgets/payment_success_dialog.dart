@@ -30,6 +30,7 @@ void showPaymentSuccessDialog({
   required DateTime date,
   required String method,
   String? parentPhone,
+  String? forMonthLabel,
 }) {
   Get.dialog(
     _PaymentSuccessContent(
@@ -38,6 +39,7 @@ void showPaymentSuccessDialog({
       date: date,
       method: method,
       parentPhone: parentPhone,
+      forMonthLabel: forMonthLabel,
     ),
     barrierDismissible: true,
   );
@@ -49,6 +51,7 @@ class _PaymentSuccessContent extends StatefulWidget {
   final DateTime date;
   final String method;
   final String? parentPhone;
+  final String? forMonthLabel;
 
   const _PaymentSuccessContent({
     required this.studentName,
@@ -56,6 +59,7 @@ class _PaymentSuccessContent extends StatefulWidget {
     required this.date,
     required this.method,
     this.parentPhone,
+    this.forMonthLabel,
   });
 
   @override
@@ -147,8 +151,17 @@ class _PaymentSuccessContentState extends State<_PaymentSuccessContent> with Sin
     }
   }
 
-  // --- CHEK CHOP ETISH (Bluetooth ESC/POS termal printer orqali) ---
+  // --- CHEK CHOP ETISH ---
+  // MUHIM: Bluetooth ESC/POS chop etish hali sozlanmoqda (debug bosqichida),
+  // shuning uchun vaqtincha "Tez kunda" ko'rsatiladi. Haqiqiy chaqiruv
+  // (printReceiptViaBluetooth) pastda IZOHLANGAN holda saqlangan — sozlash
+  // tugagach, shunchaki izohni olib tashlang va _showComingSoon() qatorini
+  // o'chiring.
   Future<void> _handlePrint() async {
+    _showComingSoon();
+    return;
+
+    // ignore: dead_code
     setState(() => _isPrinting = true);
     try {
       final success = await printReceiptViaBluetooth(
@@ -166,6 +179,16 @@ class _PaymentSuccessContentState extends State<_PaymentSuccessContent> with Sin
     } finally {
       if (mounted) setState(() => _isPrinting = false);
     }
+  }
+
+  void _showComingSoon() {
+    Get.snackbar(
+      "Tez kunda",
+      "Chek chop etish funksiyasi hozircha sozlanmoqda",
+      backgroundColor: const Color(0xFF64748B),
+      colorText: Colors.white,
+      snackPosition: SnackPosition.TOP,
+    );
   }
 
   // --- TELEGRAM (rasm sifatida ulashish) ---
@@ -202,199 +225,202 @@ class _PaymentSuccessContentState extends State<_PaymentSuccessContent> with Sin
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(28),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 32, offset: const Offset(0, 12))],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // --- ANIMATSIYALI CHECK BELGISI ---
-            ScaleTransition(
-              scale: CurvedAnimation(parent: _checkController, curve: Curves.elasticOut),
-              child: Container(
-                width: 76,
-                height: 76,
-                decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle),
-                child: const Icon(Icons.check_rounded, color: Colors.white, size: 42),
-              ),
-            ),
-            const SizedBox(height: 18),
-            const Text("To'landi!", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-            const SizedBox(height: 20),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        // MUHIM: chek ko'p qatorli bo'lib qolgani sababli (Kassir, Oy
+        // uchun, shtrix-kod va h.k.), butun Column balandligi ba'zi
+        // kichik ekranlarda ekrandan oshib, RenderFlex overflow xatosini
+        // berardi. Endi balandlik ekranning 90%i bilan cheklanadi va
+        // ichkarisi SingleChildScrollView orqali o'zi scroll bo'ladi.
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 32, offset: const Offset(0, 12))],
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // --- ANIMATSIYALI CHECK BELGISI ---
+                ScaleTransition(
+                  scale: CurvedAnimation(parent: _checkController, curve: Curves.elasticOut),
+                  child: Container(
+                    width: 76,
+                    height: 76,
+                    decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle),
+                    child: const Icon(Icons.check_rounded, color: Colors.white, size: 42),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text("To'landi!", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                const SizedBox(height: 20),
 
-            // --- FISKAL CHEK KO'RINISHI (haqiqiy kassa chekiga o'xshash) ---
-            RepaintBoundary(
-              key: _receiptKey,
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                color: Colors.white, // rasmga olinganda shaffof bo'lmasligi uchun
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    ClipPath(
-                      clipper: _ReceiptZigzagClipper(),
-                      child: Container(
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 14, offset: const Offset(0, 6))],
-                        ),
-                        child: Stack(
-                          children: [
-                            // --- FON XAVFSIZLIK NAQSHI (guilloche uslubida, juda xira) ---
-                            Positioned.fill(
-                              child: Opacity(
-                                opacity: 0.035,
-                                child: CustomPaint(painter: _GuillochePatternPainter()),
-                              ),
+                // --- FISKAL CHEK KO'RINISHI (haqiqiy kassa chekiga o'xshash) ---
+                RepaintBoundary(
+                  key: _receiptKey,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    color: Colors.white, // rasmga olinganda shaffof bo'lmasligi uchun
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        ClipPath(
+                          clipper: _ReceiptZigzagClipper(),
+                          child: Container(
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 14, offset: const Offset(0, 6))],
                             ),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(18, 18, 18, 26),
-                              child: Column(
-                                children: [
-                                  const Icon(Icons.school_rounded, color: Color(0xFF0F172A), size: 22),
-                                  const SizedBox(height: 6),
-                                  const Text(
-                                    "LEADER SCHOOL",
-                                    style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 2, color: Color(0xFF0F172A)),
+                            child: Stack(
+                              children: [
+                                // --- FON XAVFSIZLIK NAQSHI (guilloche uslubida, juda xira) ---
+                                Positioned.fill(
+                                  child: Opacity(
+                                    opacity: 0.035,
+                                    child: CustomPaint(painter: _GuillochePatternPainter()),
                                   ),
-                                  const Text(
-                                    "TO'LOV CHEKI",
-                                    style: TextStyle(fontFamily: 'monospace', fontSize: 10.5, letterSpacing: 3, color: Color(0xFF94A3B8)),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Container(width: 32, height: 2, color: const Color(0xFF10B981)),
-                                  const SizedBox(height: 14),
-                                  _fiscalDivider(),
-                                  const SizedBox(height: 10),
-
-                                  _fiscalRow("O'quvchi", widget.studentName),
-                                  const SizedBox(height: 5),
-                                  _fiscalRow("Sana", DateFormat('dd.MM.yyyy HH:mm').format(widget.date)),
-                                  const SizedBox(height: 5),
-                                  _fiscalRow("To'lov turi", _methodLabel(widget.method)),
-                                  const SizedBox(height: 5),
-                                  _fiscalRow("Kassir", "Admin"),
-                                  const SizedBox(height: 5),
-                                  _fiscalRow("Chek №", "${DateTime.now().millisecondsSinceEpoch}".substring(6)),
-
-                                  const SizedBox(height: 12),
-                                  _fiscalDivider(),
-                                  const SizedBox(height: 12),
-
-                                  const Row(
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 26),
+                                  child: Column(
                                     children: [
-                                      Expanded(child: Text("1x O'quv to'lovi", style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: Color(0xFF334155)))),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _fiscalDivider(),
-                                  const SizedBox(height: 12),
+                                      const Icon(Icons.school_rounded, color: Color(0xFF0F172A), size: 22),
+                                      const SizedBox(height: 6),
+                                      const Text(
+                                        "LEADER SCHOOL",
+                                        style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 2, color: Color(0xFF0F172A)),
+                                      ),
+                                      const Text(
+                                        "TO'LOV CHEKI",
+                                        style: TextStyle(fontFamily: 'monospace', fontSize: 10.5, letterSpacing: 3, color: Color(0xFF94A3B8)),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Container(width: 32, height: 2, color: const Color(0xFF10B981)),
+                                      const SizedBox(height: 14),
+                                      _fiscalDivider(),
+                                      const SizedBox(height: 10),
 
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      const Text("JAMI", style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A), letterSpacing: 1)),
+                                      _fiscalRow("O'quvchi", widget.studentName),
+                                      const SizedBox(height: 5),
+                                      _fiscalRow("Sana", DateFormat('dd.MM.yyyy HH:mm').format(widget.date)),
+                                      const SizedBox(height: 5),
+                                      _fiscalRow("To'lov turi", _methodLabel(widget.method)),
+                                      const SizedBox(height: 5),
+                                      if (widget.forMonthLabel != null) ...[
+                                        _fiscalRow("Oy uchun", widget.forMonthLabel!),
+                                        const SizedBox(height: 5),
+                                      ],
+                                      _fiscalRow("Kassir", "Admin"),
+                                      const SizedBox(height: 5),
+                                      _fiscalRow("Chek №", "${DateTime.now().millisecondsSinceEpoch}".substring(6)),
+
+                                      const SizedBox(height: 12),
+                                      _fiscalDivider(),
+                                      const SizedBox(height: 12),
+
+                                      const Row(
+                                        children: [
+                                          Expanded(child: Text("1x O'quv to'lovi", style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: Color(0xFF334155)))),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      _fiscalDivider(),
+                                      const SizedBox(height: 12),
+
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          const Text("JAMI", style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A), letterSpacing: 1)),
+                                          Text(
+                                            "${_formatAmount(widget.amount)} so'm",
+                                            style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF0F172A)),
+                                          ),
+                                        ],
+                                      ),
+
+                                      const SizedBox(height: 18),
+                                      SizedBox(
+                                        height: 34,
+                                        child: CustomPaint(size: const Size(double.infinity, 34), painter: _BarcodePainter()),
+                                      ),
+                                      const SizedBox(height: 6),
                                       Text(
-                                        "${_formatAmount(widget.amount)} so'm",
-                                        style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF0F172A)),
+                                        "${DateTime.now().millisecondsSinceEpoch}",
+                                        style: const TextStyle(fontFamily: 'monospace', fontSize: 9, color: Color(0xFFCBD5E1), letterSpacing: 1),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      const Text(
+                                        "Xarid uchun rahmat!",
+                                        style: TextStyle(fontFamily: 'monospace', fontSize: 10, color: Color(0xFF94A3B8), fontStyle: FontStyle.italic),
                                       ),
                                     ],
                                   ),
-
-                                  const SizedBox(height: 18),
-                                  SizedBox(
-                                    height: 34,
-                                    child: CustomPaint(size: const Size(double.infinity, 34), painter: _BarcodePainter()),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    "${DateTime.now().millisecondsSinceEpoch}",
-                                    style: const TextStyle(fontFamily: 'monospace', fontSize: 9, color: Color(0xFFCBD5E1), letterSpacing: 1),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  const Text(
-                                    "Xarid uchun rahmat!",
-                                    style: TextStyle(fontFamily: 'monospace', fontSize: 10, color: Color(0xFF94A3B8), fontStyle: FontStyle.italic),
-                                  ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
+
+                       
+
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 22),
+
+                // --- 3 TA HARAKAT TUGMASI ---
+                Row(
+                  children: [
+                    Expanded(
+                      child: _ActionButton(
+                        icon: Icons.sms_rounded,
+                        label: "SMS",
+                        color: const Color(0xFF3B82F6),
+                        isLoading: _isSendingSms,
+                        onTap: _handleSendSms,
                       ),
                     ),
-
-                    // --- "TO'LANDI" DUMALOQ SHTAMPI (real muhr ko'rinishida) ---
-                    Positioned(
-                      top: 40,
-                      right: 6,
-                      child: Transform.rotate(
-                        angle: -0.3,
-                        child: SizedBox(
-                          width: 92,
-                          height: 92,
-                          child: CustomPaint(painter: _RoundStampPainter()),
-                        ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _ActionButton(
+                        icon: Icons.print_rounded,
+                        label: "Chek",
+                        color: const Color(0xFF8B5CF6),
+                        isLoading: _isPrinting,
+                        onTap: _handlePrint,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _ActionButton(
+                        icon: Icons.telegram_rounded,
+                        label: "Telegram",
+                        color: const Color(0xFF10B981),
+                        isLoading: _isSharing,
+                        onTap: _handleShareTelegram,
                       ),
                     ),
                   ],
                 ),
-              ),
-            ),
 
-            const SizedBox(height: 22),
-
-            // --- 3 TA HARAKAT TUGMASI ---
-            Row(
-              children: [
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.sms_rounded,
-                    label: "SMS",
-                    color: const Color(0xFF3B82F6),
-                    isLoading: _isSendingSms,
-                    onTap: _handleSendSms,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.print_rounded,
-                    label: "Chek",
-                    color: const Color(0xFF8B5CF6),
-                    isLoading: _isPrinting,
-                    onTap: _handlePrint,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.telegram_rounded,
-                    label: "Telegram",
-                    color: const Color(0xFF10B981),
-                    isLoading: _isSharing,
-                    onTap: _handleShareTelegram,
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => Get.back(),
+                    child: const Text("Yopish", style: TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.w600)),
                   ),
                 ),
               ],
             ),
-
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: () => Get.back(),
-                child: const Text("Yopish", style: TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -464,57 +490,6 @@ class _DashedLinePainter extends CustomPainter {
 /// Haqiqiy dumaloq muhrga o'xshash "TO'LANDI" shtampi — ikki qatorli
 /// halqa, o'rtada qalin matn, atrofida kichik yulduzchalar (Markaziy
 /// Osiyoda keng tarqalgan yashil rangli to'lov muhrlariga o'xshash).
-class _RoundStampPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final outerRadius = size.width / 2 - 2;
-    final innerRadius = outerRadius - 7;
-    final color = const Color(0xFF10B981).withOpacity(0.85);
-
-    final ringPaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2;
-
-    canvas.drawCircle(center, outerRadius, ringPaint);
-    canvas.drawCircle(center, innerRadius, ringPaint..strokeWidth = 1.2);
-
-    // Halqa atrofidagi kichik nuqta-yulduzchalar (dekorativ)
-    final dotPaint = Paint()..color = color;
-    const dotCount = 16;
-    final dotRadius = (outerRadius + innerRadius) / 2;
-    for (int i = 0; i < dotCount; i++) {
-      final angle = (2 * math.pi / dotCount) * i;
-      final dx = center.dx + dotRadius * math.cos(angle);
-      final dy = center.dy + dotRadius * math.sin(angle);
-      canvas.drawCircle(Offset(dx, dy), 0.8, dotPaint);
-    }
-
-    // Markaziy matn
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: "TO'LANDI",
-        style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.5),
-      ),
-      textAlign: TextAlign.center,
-     );
-    textPainter.layout(maxWidth: innerRadius * 1.7);
-    textPainter.paint(canvas, Offset(center.dx - textPainter.width / 2, center.dy - textPainter.height / 2 - 4));
-
-    final datePainter = TextPainter(
-      text: TextSpan(
-        text: DateFormat('dd.MM.yy').format(DateTime.now()),
-        style: TextStyle(color: color, fontSize: 8, letterSpacing: 0.5),
-      ),
-     );
-    datePainter.layout();
-    datePainter.paint(canvas, Offset(center.dx - datePainter.width / 2, center.dy + 8));
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
 
 /// Rasmiy hujjatlarda uchraydigan "guilloche" xavfsizlik naqshini
 /// taqlid qiluvchi, juda xira (deyarli sezilmaydigan) fon chizig'i.

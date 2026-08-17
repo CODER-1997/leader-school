@@ -21,6 +21,14 @@ class StudentProfileController extends GetxController {
 
   StudentProfileController({required this.studentId, required this.subjectId});
 
+  /// YANGI: avval bu controller faqat onInit()da BIR MARTA ma'lumot
+  /// olardi, uni qayta yuklaydigan hech qanday yo'l yo'q edi — shuning
+  /// uchun "Ma'lumotlar" va "Davomat" ekranlari, server tomonda
+  /// o'zgargan bo'lsa ham, HECH QACHON yangilanmasdi. Endi bu public
+  /// metod orqali "Yangilash" tugmasi istalgan vaqtda qayta so'rov
+  /// yuborishi mumkin.
+  Future<void> refresh() => fetchStudentProfileData();
+
   @override
   void onInit() {
     super.onInit();

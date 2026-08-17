@@ -5,19 +5,7 @@ import 'package:get/get.dart';
 import '../../services/payment_cache_service.dart';
 import '../../services/payment_stats_service.dart';
 
-/// MUHIM ARXITEKTURA O'ZGARISHI: avval Admin to'lovlar ro'yxati
-/// `collectionGroup('payments')` orqali o'qilardi — bu Firestore'da
-/// DOIM qo'lda (Console orqali) yaratiladigan composite index talab
-/// qiladi, va bu doimiy ishlash-to'siq (friction) bo'lib qoldi.
-///
-/// Endi har bir to'lov YOZILGANDA, xuddi shu ID bilan yengil bir
-/// nusxasi 'payments_feed' (TOP-LEVEL, oddiy) collection'iga ham
-/// yoziladi. Admin endi collectionGroup EMAS, shu oddiy collection'ni
-/// o'qiydi — bunday (bitta maydon bo'yicha where+orderBy) so'rovlar
-/// uchun Firestore HECH QANDAY qo'lda index talab qilmaydi, avtomatik
-/// ishlaydi. Manba (source of truth) hamon
-/// students/{studentId}/payments — 'payments_feed' esa faqat admin
-/// ro'yxati uchun tez o'qish nusxasi.
+
 class StudentPaymentController extends GetxController {
   final String studentId;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -54,39 +42,45 @@ class StudentPaymentController extends GetxController {
     }
   }
 
+  /// MUHIM: bu FULL (delta emas) sync ishlatadi — foydalanuvchi "Yangilash"
+  /// tugmasini bosganda, u aynan "ma'lumot serverda o'zgargan bo'lishi
+  /// mumkin, hammasini qayta tekshir" deb signal beryapti. Shu sababli
+  /// delta-cursor'ga ishonib o'tirmaymiz.
+  @override
   Future<void> refresh() async {
-    final synced = await _cacheService.syncPayments(studentId);
+    final synced = await _cacheService.syncPayments(studentId, forceFull: true);
+    // VAQTINCHA DEBUG — muammoni aniqlagach o'chirib tashlang:
+    debugPrint("🔍 REFRESH: studentId=$studentId, Firestore/kesh'dan qaytgan to'lovlar soni=${synced.length}");
     payments.value = synced;
+    debugPrint("🔍 REFRESH: payments.value yangilandi, hozirgi uzunlik=${payments.length}");
   }
 
+  String get currentMonthKey => PaymentStatsService.monthKeyFor(DateTime.now());
+
+  // MUHIM: endi TO'LOV SANASI emas, balki "QAYSI OY UCHUN" (forMonth)
+  // maydoni tekshiriladi — chunki sentabrda avgust uchun to'lov qilingan
+  // bo'lishi mumkin, va bu holda "joriy oy to'langan" degan xulosa
+  // FAQAT forMonth == joriy_oy bo'lgandagina to'g'ri bo'ladi.
   bool get hasSchoolPaymentThisMonth {
-    final now = DateTime.now();
-    return payments.any((p) {
-      if (p['source'] != 'school') return false;
-      final date = DateTime.fromMillisecondsSinceEpoch(p['dateMs'] ?? 0);
-      return date.year == now.year && date.month == now.month;
-    });
+    final key = currentMonthKey;
+    return payments.any((p) => p['source'] == 'school' && p['forMonth'] == key);
   }
 
   double get totalPaidThisMonth {
-    final now = DateTime.now();
-    return payments
-        .where((p) {
-      final date = DateTime.fromMillisecondsSinceEpoch(p['dateMs'] ?? 0);
-      return date.year == now.year && date.month == now.month;
-    })
-        .fold(0.0, (sum, p) => sum + (p['amount'] as double));
+    final key = currentMonthKey;
+    return payments.where((p) => p['forMonth'] == key).fold(0.0, (sum, p) => sum + (p['amount'] as double));
   }
 
   // =======================================================================
   // QO'SHISH — 1 ta atomik WriteBatch: (1) asosiy hujjat, (2) feed nusxasi,
-  // (3) statistika increment. 0 Read.
+  // (3) statistika increment (forMonth bo'yicha). 0 Read.
   // =======================================================================
   Future<Map<String, dynamic>?> addPayment({
     required double amount,
     required DateTime date,
     required String method,
     required String studentName,
+    required String forMonthKey, // "YYYY-MM" — qaysi oy uchun to'lov
   }) async {
     isSaving.value = true;
     try {
@@ -100,15 +94,16 @@ class StudentPaymentController extends GetxController {
         'studentName': studentName,
         'studentId': studentId,
         'isLocked': false,
+        'forMonth': forMonthKey,
         'date': Timestamp.fromDate(date),
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
       batch.set(docRef, data);
-      batch.set(_feedRef(docRef.id), data); // YANGI: feed nusxasi, bir xil ID
+      batch.set(_feedRef(docRef.id), data);
 
-      PaymentStatsService.applyDelta(batch, amountDelta: amount, countDelta: 1, source: 'school', date: date);
+      PaymentStatsService.applyDelta(batch, amountDelta: amount, countDelta: 1, source: 'school', monthKey: forMonthKey);
 
       await batch.commit();
 
@@ -119,6 +114,7 @@ class StudentPaymentController extends GetxController {
         'source': 'school',
         'note': '',
         'isLocked': false,
+        'forMonth': forMonthKey,
         'dateMs': date.millisecondsSinceEpoch,
       };
 
@@ -135,13 +131,14 @@ class StudentPaymentController extends GetxController {
   }
 
   // =======================================================================
-  // TAHRIRLASH — asosiy hujjat VA feed nusxasi bir vaqtda yangilanadi.
+  // TAHRIRLASH
   // =======================================================================
   Future<bool> editPayment({
     required String paymentId,
     required double newAmount,
     required DateTime newDate,
     required String newMethod,
+    required String newForMonthKey,
   }) async {
     final index = payments.indexWhere((p) => p['id'] == paymentId);
     if (index == -1) return false;
@@ -153,7 +150,7 @@ class StudentPaymentController extends GetxController {
     }
 
     final oldAmount = old['amount'] as double;
-    final oldDate = DateTime.fromMillisecondsSinceEpoch(old['dateMs'] ?? 0);
+    final oldForMonth = old['forMonth'] as String? ?? '';
 
     isSaving.value = true;
     try {
@@ -161,26 +158,24 @@ class StudentPaymentController extends GetxController {
       final updateData = {
         'amount': newAmount,
         'method': newMethod,
+        'forMonth': newForMonthKey,
         'date': Timestamp.fromDate(newDate),
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
       batch.update(_paymentsRef.doc(paymentId), updateData);
-      batch.update(_feedRef(paymentId), updateData); // YANGI: feed ham yangilanadi
+      batch.update(_feedRef(paymentId), updateData);
 
-      final oldMonth = PaymentStatsService.monthKey(oldDate);
-      final newMonth = PaymentStatsService.monthKey(newDate);
-
-      if (oldMonth == newMonth) {
-        PaymentStatsService.applyDelta(batch, amountDelta: newAmount - oldAmount, countDelta: 0, source: 'school', date: newDate);
+      if (oldForMonth == newForMonthKey) {
+        PaymentStatsService.applyDelta(batch, amountDelta: newAmount - oldAmount, countDelta: 0, source: 'school', monthKey: newForMonthKey);
       } else {
-        PaymentStatsService.applyDelta(batch, amountDelta: -oldAmount, countDelta: -1, source: 'school', date: oldDate);
-        PaymentStatsService.applyDelta(batch, amountDelta: newAmount, countDelta: 1, source: 'school', date: newDate);
+        PaymentStatsService.applyDelta(batch, amountDelta: -oldAmount, countDelta: -1, source: 'school', monthKey: oldForMonth);
+        PaymentStatsService.applyDelta(batch, amountDelta: newAmount, countDelta: 1, source: 'school', monthKey: newForMonthKey);
       }
 
       await batch.commit();
 
-      final updated = {...old, 'amount': newAmount, 'method': newMethod, 'dateMs': newDate.millisecondsSinceEpoch};
+      final updated = {...old, 'amount': newAmount, 'method': newMethod, 'forMonth': newForMonthKey, 'dateMs': newDate.millisecondsSinceEpoch};
       payments[index] = updated;
       await _cacheService.addToCache(studentId, updated);
 
@@ -194,7 +189,7 @@ class StudentPaymentController extends GetxController {
   }
 
   // =======================================================================
-  // O'CHIRISH — asosiy hujjat VA feed nusxasi bir vaqtda o'chiriladi.
+  // O'CHIRISH
   // =======================================================================
   Future<bool> deletePayment(String paymentId) async {
     final index = payments.indexWhere((p) => p['id'] == paymentId);
@@ -207,14 +202,14 @@ class StudentPaymentController extends GetxController {
     }
 
     final amount = payment['amount'] as double;
-    final date = DateTime.fromMillisecondsSinceEpoch(payment['dateMs'] ?? 0);
+    final forMonth = payment['forMonth'] as String? ?? '';
 
     try {
       final batch = _db.batch();
       batch.delete(_paymentsRef.doc(paymentId));
-      batch.delete(_feedRef(paymentId)); // YANGI: feed ham o'chiriladi
+      batch.delete(_feedRef(paymentId));
 
-      PaymentStatsService.applyDelta(batch, amountDelta: -amount, countDelta: -1, source: 'school', date: date);
+      PaymentStatsService.applyDelta(batch, amountDelta: -amount, countDelta: -1, source: 'school', monthKey: forMonth);
 
       await batch.commit();
 
@@ -230,8 +225,7 @@ class StudentPaymentController extends GetxController {
   }
 
   // =======================================================================
-  // QULFLASH — QAYTARIB BO'LMAYDI. Asosiy hujjat VA feed nusxasi bir
-  // vaqtda qulflanadi.
+  // QULFLASH — QAYTARIB BO'LMAYDI.
   // =======================================================================
   Future<void> lockPayment(String paymentId) async {
     final index = payments.indexWhere((p) => p['id'] == paymentId);
@@ -242,7 +236,7 @@ class StudentPaymentController extends GetxController {
       final lockData = {'isLocked': true, 'updatedAt': FieldValue.serverTimestamp()};
 
       batch.update(_paymentsRef.doc(paymentId), lockData);
-      batch.update(_feedRef(paymentId), lockData); // YANGI
+      batch.update(_feedRef(paymentId), lockData);
 
       await batch.commit();
 

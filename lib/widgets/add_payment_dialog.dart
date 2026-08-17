@@ -3,8 +3,20 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 
-import '../controllers/school_student_profil/student_payment_controller.dart';
- import 'payment_success_dialog.dart';
+ import '../controllers/school_student_profil/student_payment_controller.dart';
+import 'payment_success_dialog.dart';
+
+const List<String> _uzMonthNames = [
+  'Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun',
+  'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr',
+];
+
+String monthKeyOf(DateTime d) => "${d.year}-${d.month.toString().padLeft(2, '0')}";
+
+String monthLabelOf(DateTime d, {bool withYear = false}) {
+  final name = _uzMonthNames[d.month - 1];
+  return withYear ? "$name ${d.year}" : name;
+}
 
 /// To'lov qo'shish HAM tahrirlash uchun bitta oyna.
 /// [existingPayment] berilsa -> tahrirlash rejimi (muvaffaqiyat oynasi
@@ -25,6 +37,17 @@ void showAddPaymentDialog(
       ? DateTime.fromMillisecondsSinceEpoch(existingPayment['dateMs'] ?? DateTime.now().millisecondsSinceEpoch)
       : DateTime.now();
   String method = isEdit ? (existingPayment['method'] ?? 'cash') : 'cash';
+
+  // YANGI: "qaysi oy uchun" — endi FAQAT orqaga emas, OLDINGA ham qaraydi,
+  // chunki ota-ona keyingi oy uchun OLDINDAN to'lashi ham mumkin. Diapazon:
+  // 4 oy orqaga, joriy oy, 2 oy oldinga (jami 7 oy).
+  final now = DateTime.now();
+  final List<DateTime> recentMonths = List.generate(7, (i) => DateTime(now.year, now.month - 4 + i, 1));
+  final int currentMonthIndex = recentMonths.indexWhere((m) => m.year == now.year && m.month == now.month);
+  final ScrollController monthScrollController = ScrollController();
+  String selectedForMonthKey = isEdit
+      ? (existingPayment['forMonth'] as String? ?? monthKeyOf(now))
+      : monthKeyOf(now);
 
   Get.dialog(
     StatefulBuilder(
@@ -110,6 +133,66 @@ void showAddPaymentDialog(
                     ),
 
                     const SizedBox(height: 18),
+                    const Text("Qaysi oy uchun", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155), fontSize: 13)),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 64,
+                      child: Builder(
+                        builder: (context) {
+                          // Dialog birinchi qurilganda joriy oy ko'rinadigan
+                          // joyga avtomatik skroll qilamiz (chip kengligi
+                          // ~76px: 68 o'zi + 8 orasi).
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (monthScrollController.hasClients && currentMonthIndex > 0) {
+                              monthScrollController.jumpTo(
+                                (currentMonthIndex * 76.0).clamp(0.0, monthScrollController.position.maxScrollExtent),
+                              );
+                            }
+                          });
+                          return ListView.separated(
+                            controller: monthScrollController,
+                            scrollDirection: Axis.horizontal,
+                            itemCount: recentMonths.length,
+                            separatorBuilder: (_, __) => const SizedBox(width: 8),
+                            itemBuilder: (context, i) {
+                              final m = recentMonths[i];
+                              final key = monthKeyOf(m);
+                              final selected = key == selectedForMonthKey;
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () => setState(() => selectedForMonthKey = key),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  width: 68,
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: selected ? const Color(0xFF10B981).withOpacity(0.08) : const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: selected ? const Color(0xFF10B981) : const Color(0xFFE2E8F0), width: selected ? 1.5 : 1),
+                                  ),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        monthLabelOf(m).substring(0, 3),
+                                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: selected ? const Color(0xFF10B981) : const Color(0xFF334155)),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        "${m.year}",
+                                        style: TextStyle(fontSize: 10, color: selected ? const Color(0xFF10B981) : const Color(0xFF94A3B8)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+
+                    const SizedBox(height: 18),
                     const Text("To'lov turi", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155), fontSize: 13)),
                     const SizedBox(height: 8),
                     Row(
@@ -154,6 +237,7 @@ void showAddPaymentDialog(
                                     newAmount: amount,
                                     newDate: selectedDate,
                                     newMethod: method,
+                                    newForMonthKey: selectedForMonthKey,
                                   );
                                   if (ok) Get.back();
                                 } else {
@@ -162,6 +246,7 @@ void showAddPaymentDialog(
                                     date: selectedDate,
                                     method: method,
                                     studentName: studentName,
+                                    forMonthKey: selectedForMonthKey,
                                   );
                                   if (saved != null) {
                                     Get.back();
@@ -171,6 +256,10 @@ void showAddPaymentDialog(
                                       date: selectedDate,
                                       method: method,
                                       parentPhone: parentPhone,
+                                      forMonthLabel: monthLabelOf(
+                                        recentMonths.firstWhere((m) => monthKeyOf(m) == selectedForMonthKey, orElse: () => now),
+                                        withYear: true,
+                                      ),
                                     );
                                   }
                                 }

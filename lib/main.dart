@@ -7,6 +7,7 @@ import 'package:hive/hive.dart';
 import 'package:hive_flutter/adapters.dart';
 import 'package:leader_school/services/exam_cache_servise.dart';
 import 'package:leader_school/services/payment_cache_service.dart';
+import 'package:leader_school/services/student_photo_service.dart';
 import 'package:leader_school/views/home_view.dart';
 
 import 'controllers/crm_controller.dart';
@@ -20,6 +21,7 @@ void main() async {
   await Hive.openBox('exams_cache');
   await ExamCacheService.init();
   await PaymentCacheService.init();
+  await StudentPhotoService.init();
 
 
   // Oflayn keshni yoqamiz: dastur yashindek tez ishlashi uchun asosiy sanksiya

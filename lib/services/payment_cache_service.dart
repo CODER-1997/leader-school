@@ -51,8 +51,15 @@ class PaymentCacheService {
   Future<void> _setLastSyncedAtMs(String studentId, int ms) =>
       _metaBox.put('lastSync_$studentId', ms);
 
-  Future<List<Map<String, dynamic>>> syncPayments(String studentId) async {
-    final lastSyncMs = _lastSyncedAtMs(studentId);
+  /// [forceFull] = true bo'lsa — delta-sync cursor'ni CHETLAB, BARCHA
+  /// hujjatlarni qayta o'qiydi va keshni TO'LIQ ALMASHTIRADI (merge emas).
+  /// Bu MUHIM: agar ma'lumot Firebase Console orqali qo'lda o'zgartirilgan
+  /// bo'lsa (updatedAt yangilanmasdan), oddiy delta-sync buni SEZMAYDI —
+  /// forceFull esa har doim haqiqiy holatni oladi, hatto o'chirilgan
+  /// hujjatlarni ham to'g'ri aks ettiradi (delta-sync o'chirishni ham
+  /// bila olmaydi).
+  Future<List<Map<String, dynamic>>> syncPayments(String studentId, {bool forceFull = false}) async {
+    final lastSyncMs = forceFull ? null : _lastSyncedAtMs(studentId);
 
     Query query = _paymentsRef(studentId);
     if (lastSyncMs != null) {
@@ -61,6 +68,35 @@ class PaymentCacheService {
     query = query.orderBy('updatedAt', descending: false);
 
     final snap = await query.get();
+
+    if (forceFull) {
+      final fresh = snap.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return {
+          'id': doc.id,
+          'amount': (data['amount'] ?? 0).toDouble(),
+          'method': data['method'] ?? 'cash',
+          'source': data['source'] ?? 'school',
+          'note': data['note'] ?? '',
+          'isLocked': data['isLocked'] ?? false,
+          'forMonth': data['forMonth'] ?? '',
+          'dateMs': (data['date'] as Timestamp?)?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
+        };
+      }).toList();
+
+      await _writeRaw(studentId, fresh);
+
+      int maxUpdatedAtMs = 0;
+      for (final doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final ms = (data['updatedAt'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
+        if (ms > maxUpdatedAtMs) maxUpdatedAtMs = ms;
+      }
+      await _setLastSyncedAtMs(studentId, maxUpdatedAtMs > 0 ? maxUpdatedAtMs : DateTime.now().millisecondsSinceEpoch);
+
+      return getCachedPayments(studentId);
+    }
+
     if (snap.docs.isEmpty) return getCachedPayments(studentId);
 
     final cached = _readRaw(studentId);
@@ -81,6 +117,7 @@ class PaymentCacheService {
         'source': data['source'] ?? 'school',
         'note': data['note'] ?? '',
         'isLocked': data['isLocked'] ?? false,
+        'forMonth': data['forMonth'] ?? '', // YANGI: "YYYY-MM" — qaysi oy uchun
         'dateMs': (data['date'] as Timestamp?)?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
       };
 
