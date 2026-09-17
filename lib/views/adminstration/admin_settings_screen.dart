@@ -1,4 +1,4 @@
- import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 
@@ -7,10 +7,12 @@ import '../../controllers/admin_controller/admin_settings_controller.dart';
 import '../../services/access_code_service.dart';
 import '../../services/get_helper.dart';
 
-/// Sozlamalar ekrani — TABBAR YO'Q. Bitta vertikal ro'yxat, ichida bo'lim
-/// sarlavhalari (SMS / Xavfsizlik) va har biri ostida accordion kartalar.
-/// Foydalanuvchi hammasini bir joyda scroll qilib ko'radi, kerakli kartani
-/// ochib tahrirlaydi.
+/// Sozlamalar ekrani — TABBAR YO'Q. Bitta vertikal ro'yxat.
+///
+/// YANGI: Davomat SMS shablonlari endi ANIQ IKKI BO'LIMGA ajratilgan —
+/// "Maktab SMS shablonlari" va "O'quv Markaz SMS shablonlari" — chunki
+/// bitta xabar matnining ikkalasiga ham (sinf VA guruh/fan uchun) bir
+/// xil ketishi mantiqsiz edi.
 class AdminSettingsScreen extends StatefulWidget {
   const AdminSettingsScreen({super.key});
 
@@ -19,9 +21,6 @@ class AdminSettingsScreen extends StatefulWidget {
 }
 
 class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
-  // Bir vaqtda faqat BITTA karta ochiq bo'lishi uchun umumiy kalit.
-  // Har bir kartaning o'ziga xos ID'si bor (masalan 'sms_attendance',
-  // 'security_code'), shu orqali qaysi biri ochiqligini bilamiz.
   String? _expandedKey;
 
   void _toggle(String key) {
@@ -45,13 +44,16 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           children: [
-            const _SectionHeader(title: "SMS shablonlari", subtitle: "Ota-onalarga avtomatik yuboriladigan matnlar"),
+            // =================================================================
+            // BO'LIM 1: MAKTAB SMS shablonlari
+            // =================================================================
+            const _SectionHeader(title: "Maktab SMS shablonlari", subtitle: "Sinf/fan davomati bo'yicha ota-onalarga yuboriladi"),
             const SizedBox(height: 10),
             _SmsTemplateCard(
               cardKey: 'sms_attendance',
               icon: Icons.fact_check_outlined,
               iconColor: const Color(0xFF3B82F6),
-              title: "Davomat haqida",
+              title: "Davomat haqida (kelmagan)",
               placeholders: const ["{ism}", "{sinf}", "{sana}"],
               textController: smsController.attendanceController,
               dirty: smsController.attendanceDirty,
@@ -60,6 +62,60 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
               expanded: _expandedKey == 'sms_attendance',
               onToggle: () => _toggle('sms_attendance'),
             ),
+            const SizedBox(height: 10),
+            _SmsTemplateCard(
+              cardKey: 'sms_attendance_present',
+              icon: Icons.check_circle_outline_rounded,
+              iconColor: const Color(0xFF10B981),
+              title: "Davomat haqida (kelgan)",
+              placeholders: const ["{ism}", "{sinf}", "{sana}"],
+              textController: smsController.attendancePresentController,
+              dirty: smsController.attendancePresentDirty,
+              isSaving: smsController.isSavingAttendancePresent,
+              onSave: smsController.saveAttendancePresentTemplate,
+              expanded: _expandedKey == 'sms_attendance_present',
+              onToggle: () => _toggle('sms_attendance_present'),
+            ),
+
+            const SizedBox(height: 28),
+            // =================================================================
+            // BO'LIM 2: YANGI — O'QUV MARKAZ SMS shablonlari (alohida)
+            // =================================================================
+            const _SectionHeader(title: "O'quv Markaz SMS shablonlari", subtitle: "Guruh/fan davomati bo'yicha ota-onalarga yuboriladi"),
+            const SizedBox(height: 10),
+            _SmsTemplateCard(
+              cardKey: 'sms_center_attendance',
+              icon: Icons.fact_check_outlined,
+              iconColor: const Color(0xFFEF4444),
+              title: "Davomat haqida (kelmagan)",
+              placeholders: const ["{ism}", "{guruh}", "{sana}"],
+              textController: smsController.centerAttendanceController,
+              dirty: smsController.centerAttendanceDirty,
+              isSaving: smsController.isSavingCenterAttendance,
+              onSave: smsController.saveCenterAttendanceTemplate,
+              expanded: _expandedKey == 'sms_center_attendance',
+              onToggle: () => _toggle('sms_center_attendance'),
+            ),
+            const SizedBox(height: 10),
+            _SmsTemplateCard(
+              cardKey: 'sms_center_attendance_present',
+              icon: Icons.check_circle_outline_rounded,
+              iconColor: const Color(0xFF10B981),
+              title: "Davomat haqida (kelgan)",
+              placeholders: const ["{ism}", "{guruh}", "{sana}"],
+              textController: smsController.centerAttendancePresentController,
+              dirty: smsController.centerAttendancePresentDirty,
+              isSaving: smsController.isSavingCenterAttendancePresent,
+              onSave: smsController.saveCenterAttendancePresentTemplate,
+              expanded: _expandedKey == 'sms_center_attendance_present',
+              onToggle: () => _toggle('sms_center_attendance_present'),
+            ),
+
+            const SizedBox(height: 28),
+            // =================================================================
+            // BO'LIM 3: UMUMIY (ikkalasiga ham tegishli) SMS shablonlari
+            // =================================================================
+            const _SectionHeader(title: "Umumiy SMS shablonlari", subtitle: "To'lov va imtihon bo'yicha"),
             const SizedBox(height: 10),
             _SmsTemplateCard(
               cardKey: 'sms_payment',
@@ -644,9 +700,6 @@ class _LoginHistoryListState extends State<_LoginHistoryList> {
     }
   }
 
-  /// Vaqtni "5 daqiqa oldin", "3 soat oldin", "Kecha, 14:32",
-  /// "12-avgust, 09:15" kabi inson o'qiy oladigan shaklga o'giradi —
-  /// xom timestamp ("2026-08-11 14:32:07.000") o'rniga.
   String _humanTime(DateTime dt) {
     final now = DateTime.now();
     final diff = now.difference(dt);
@@ -661,10 +714,6 @@ class _LoginHistoryListState extends State<_LoginHistoryList> {
     }
 
     if (dt.year == now.year) {
-      // MUHIM: DateFormat('...', 'uz') lokal ma'lumotlarni talab qiladi
-      // (initializeDateFormatting() chaqirilishi kerak) — agar ilovada
-      // hali sozlanmagan bo'lsa xato beradi. Shu sababli, ilovaning
-      // qolgan qismida ishlatilgan xavfsiz, raqamli formatga qaytamiz.
       return DateFormat('dd.MM, HH:mm').format(dt);
     }
 

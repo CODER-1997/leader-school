@@ -60,7 +60,7 @@ class _AdminMainViewState extends State<AdminMainView> {
       case 0:
         return const AdminDashboardScreen();
       case 1:
-        return const AdminAttendanceScreen();
+        return const AdminAbsentStudentsScreen();
       case 2:
         return const AdminTeachersScreen();
       case 3:

@@ -77,7 +77,6 @@ class _PaymentSuccessContentState extends State<_PaymentSuccessContent> with Sin
   // TEST REJIMI: xuddi davomat SMS'idagi kabi, hozircha BARCHA to'lov
   // SMS'lari shu raqamga yuboriladi. Test tugagach, _handleSendSms()
   // ichida shu qatorni o'chirib, widget.parentPhone'ni ishlating.
-  static const String _testSmsOverrideRecipient = '+998909050317';
 
   @override
   void initState() {
@@ -140,7 +139,7 @@ class _PaymentSuccessContentState extends State<_PaymentSuccessContent> with Sin
 
       // TEST REJIMI: haqiqiy widget.parentPhone o'rniga test raqamiga
       // yuboriladi. Testdan keyin `widget.parentPhone!`ga almashtiring.
-      await SMSService().sendSMS(_testSmsOverrideRecipient, message);
+      await SMSService().sendSMS(widget.parentPhone!, message);
       // await SMSService().sendSMS(widget.parentPhone!, message);
 
       Get.snackbar("Yuborildi", "SMS ota-onaga yuborildi", backgroundColor: const Color(0xFF10B981), colorText: Colors.white);

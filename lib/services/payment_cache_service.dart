@@ -80,6 +80,7 @@ class PaymentCacheService {
           'note': data['note'] ?? '',
           'isLocked': data['isLocked'] ?? false,
           'forMonth': data['forMonth'] ?? '',
+          'forSubjectId': data['forSubjectId'], // YANGI: fan darajasidagi to'lov uchun
           'dateMs': (data['date'] as Timestamp?)?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
         };
       }).toList();

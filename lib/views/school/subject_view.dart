@@ -119,16 +119,36 @@ class SubjectsView extends StatelessWidget {
                       classId: classId,
                     ));
                   },
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined, size: 20, color: Color(0xFF64748B)),
-                        onPressed: () => controller.updateSubject(context, doc.id, subjectName),
+                  trailing: PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert_rounded, color: Color(0xFF94A3B8)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    onSelected: (value) {
+                      if (value == 'edit') {
+                        controller.updateSubject(context, doc.id, subjectName);
+                      } else if (value == 'delete') {
+                        controller.deleteSubject(doc.id, subjectName);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit_outlined, size: 18, color: Color(0xFF3B82F6)),
+                            SizedBox(width: 10),
+                            Text("Tahrirlash"),
+                          ],
+                        ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded, size: 20, color: Color(0xFFEF4444)),
-                        onPressed: () => controller.deleteSubject(doc.id, subjectName),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFDC2626)),
+                            SizedBox(width: 10),
+                            Text("O'chirish", style: TextStyle(color: Color(0xFFDC2626))),
+                          ],
+                        ),
                       ),
                     ],
                   ),

@@ -87,17 +87,21 @@ class AdminPaymentsController extends GetxController {
     }
   }
 
-  // =========================================================================
-// YANGI METOD — buni AdminPaymentsController klassi ICHIGA qo'shing
-// (masalan lockPaymentsInRange metodidan keyin). Butun faylni emas,
-// FAQAT shu metodni qo'shing.
-// =========================================================================
-
-  /// Excel hisoboti uchun — tanlangan davrdagi BARCHA to'lovlarni
-  /// (limit(50) CHEKLOVISIZ) 'payments_feed'dan o'qiydi.
+  /// Excel hisoboti VA hisobot ekrani uchun — tanlangan davrdagi BARCHA
+  /// to'lovlarni (limit(50) CHEKLOVISIZ) 'payments_feed'dan o'qiydi.
+  ///
+  /// YANGI: `source` parametri qo'shildi ('school' | 'tutoring' | null).
+  /// MUHIM: Firestore so'rovida FAQAT sana oralig'i (bitta maydon
+  /// bo'yicha range) qoladi — index talab qilmaydi. Manba bo'yicha
+  /// filtrlash esa DART TOMONIDA (client-side) bajariladi — agar buni
+  /// ham Firestore so'roviga qo'shsak (where('source', ==) + sana
+  /// range birga), Firestore composite index talab qilardi. Bu yerda
+  /// hajm (bir necha yuzlab to'lov) uchun client-side filtrlash
+  /// arzon va index-siz yechim.
   Future<List<PaymentRecord>> fetchPaymentsInRange({
     required DateTime start,
     required DateTime end,
+    String? source, // YANGI: null = ikkalasi ham
   }) async {
     final snap = await _db
         .collection('payments_feed')
@@ -106,7 +110,10 @@ class AdminPaymentsController extends GetxController {
         .orderBy('date', descending: false)
         .get();
 
-    return snap.docs.map((doc) => PaymentRecord.fromDoc(doc.id, doc.data())).toList();
+    final all = snap.docs.map((doc) => PaymentRecord.fromDoc(doc.id, doc.data())).toList();
+
+    if (source == null) return all;
+    return all.where((p) => p.source == source).toList();
   }
 
   Future<void> refresh() => _fetchPayments();

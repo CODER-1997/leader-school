@@ -78,6 +78,10 @@ class ExamController extends GetxController {
         'createdAt': (data['createdAt'] as Timestamp?)?.millisecondsSinceEpoch ??
             DateTime.now().millisecondsSinceEpoch,
         'scores': Map<String, dynamic>.from(data['scores'] ?? {}),
+        // YANGI: SMS yuborilgan holatini ham o'tkazamiz — aks holda
+        // Firestore'ga yozilsa ham UI'da (getExam() orqali) ko'rinmasdi,
+        // chunki bu yerda faqat ANIQ ro'yxatlangan maydonlar saqlanadi.
+        'smsStatus': data['smsStatus'],
       });
     }
 
@@ -187,5 +191,17 @@ class ExamController extends GetxController {
           backgroundColor: Colors.red, colorText: Colors.white);
       rethrow;
     }
+  }
+
+  /// YANGI: SMS yuborilgan vaqtni HUJJATNING O'ZIDA saqlaydi — shu bilan
+  /// boshqa o'qituvchi/admin ham "SMS allaqachon yuborilgan" ekanini
+  /// ko'radi, va ota-onani qayta-qayta bezovta qilishning oldi olinadi.
+  /// Nuqta-yo'l (dot notation) ishlatiladi — shunda 'sentCount' haqiqiy
+  /// OLDINGI qiymatga nisbatan oshiriladi.
+  Future<void> markSmsSent(String examId) async {
+    await _db.collection('exams').doc(examId).update({
+      'smsStatus.sentAt': FieldValue.serverTimestamp(),
+      'smsStatus.sentCount': FieldValue.increment(1),
+    });
   }
 }

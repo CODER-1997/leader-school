@@ -35,7 +35,7 @@ class StudentPhotoService {
   static const String _boxName = 'student_photos_cache';
 
   // MUHIM: shu yerga o'z ImgBB API kalitingizni qo'ying (bepul: api.imgbb.com)
-  static const String _imgbbApiKey = 'c772c39676f0abaaabe186496469d757';
+  static const String _imgbbApiKey = '9ee5683dab53a762fda4d82a456ce996';
 
   static Future<void> init() async {
     if (!Hive.isBoxOpen(_boxName)) await Hive.openBox(_boxName);
@@ -100,9 +100,18 @@ class StudentPhotoService {
     final bytes = await File(picked.path).readAsBytes();
     final base64Image = base64Encode(bytes);
 
-    final response = await http.post(
+    // MUHIM: avval bu so'rovda HECH QANDAY vaqt chegarasi (timeout) yo'q
+    // edi — agar tarmoq sekin/javobsiz bo'lsa, loader ABADIY aylanaverardi
+    // (na muvaffaqiyat, na xato). Endi 20 soniyadan keyin aniq xato
+    // (tutib bo'ladigan) tashlanadi.
+    final response = await http
+        .post(
       Uri.parse('https://api.imgbb.com/1/upload?key=$_imgbbApiKey'),
       body: {'image': base64Image},
+    )
+        .timeout(
+      const Duration(seconds: 20),
+      onTimeout: () => throw Exception("Internet ulanishi juda sekin yoki javob bermadi (20s kutildi)"),
     );
 
     if (response.statusCode != 200) {

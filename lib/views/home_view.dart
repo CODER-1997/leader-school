@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:leader_school/views/school/school_view.dart';
-import 'package:leader_school/views/study_center/center_view.dart';
+import 'package:leader_school/views/study_center/center_home_view.dart';
+import 'package:leader_school/views/study_center/center_subject_view.dart';
 
 import '../controllers/admin_controller/admin_auth_gate.dart';
 import '../controllers/auth_home/auth_home_controller.dart';
@@ -106,8 +107,10 @@ class HomeView extends StatelessWidget {
                             isLocked: controller.userRole.value.isEmpty,
                             onTap: () {
                               if (controller.userRole.value.isNotEmpty) {
-                                Get.to(const CenterView());
-                              } else {
+                                Get.to(const CenterHomeView());
+                              }
+
+                              else {
                                 Get.snackbar(
                                   "Ruxsat yo'q",
                                   "Avval maxsus kod bilan kiring!",

@@ -3,44 +3,75 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 /// Ilova sozlamalari — hozircha faqat SMS shablonlari.
-/// Firestore manzili: BITTA hujjat 'settings/sms_templates' —
-/// 3 ta maydon (attendance, paymentDelay, examResult). Bu sozlamalar
-/// kamdan-kam o'zgaradi, shuning uchun real-time listener SHART EMAS —
-/// bir martalik .get() (ochilganda) va .set(merge:true) (saqlashda) yetarli,
-/// bu eng arzon yondashuv (real-time listener bu yerda ortiqcha xarajat).
+/// Firestore manzili: BITTA hujjat 'settings/sms_templates'.
+///
+/// YANGI: Davomat shablonlari endi MAKTAB va MARKAZ uchun ALOHIDA —
+/// chunki bir xil matnning ikkalasiga ham ketishi mantiqsiz edi
+/// (Markazda "guruh/fan"ga, Maktabda "sinf/fan"ga tegishli bo'lishi
+/// kerak). Firestore maydonlari:
+///   - 'attendance' / 'attendancePresent' — FAQAT MAKTAB uchun
+///   - 'centerAttendance' / 'centerAttendancePresent' — FAQAT MARKAZ uchun
 class AdminSettingsController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   static const String _docPath = 'settings';
   static const String _docId = 'sms_templates';
 
+  // --- MAKTAB davomat shablonlari ---
   final TextEditingController attendanceController = TextEditingController();
+  final TextEditingController attendancePresentController = TextEditingController();
+
+  // --- YANGI: MARKAZ davomat shablonlari (alohida) ---
+  final TextEditingController centerAttendanceController = TextEditingController();
+  final TextEditingController centerAttendancePresentController = TextEditingController();
+
   final TextEditingController paymentDelayController = TextEditingController();
   final TextEditingController examResultController = TextEditingController();
-  final TextEditingController paymentReceivedController = TextEditingController(); // YANGI
+  final TextEditingController paymentReceivedController = TextEditingController();
 
   var isLoading = true.obs;
   var isSavingAttendance = false.obs;
+  var isSavingAttendancePresent = false.obs;
+  var isSavingCenterAttendance = false.obs; // YANGI
+  var isSavingCenterAttendancePresent = false.obs; // YANGI
   var isSavingPaymentDelay = false.obs;
   var isSavingExamResult = false.obs;
-  var isSavingPaymentReceived = false.obs; // YANGI
+  var isSavingPaymentReceived = false.obs;
 
   var attendanceDirty = false.obs;
+  var attendancePresentDirty = false.obs;
+  var centerAttendanceDirty = false.obs; // YANGI
+  var centerAttendancePresentDirty = false.obs; // YANGI
   var paymentDelayDirty = false.obs;
   var examResultDirty = false.obs;
-  var paymentReceivedDirty = false.obs; // YANGI
+  var paymentReceivedDirty = false.obs;
 
   String _originalAttendance = '';
+  String _originalAttendancePresent = '';
+  String _originalCenterAttendance = ''; // YANGI
+  String _originalCenterAttendancePresent = ''; // YANGI
   String _originalPaymentDelay = '';
   String _originalExamResult = '';
-  String _originalPaymentReceived = ''; // YANGI
+  String _originalPaymentReceived = '';
 
   static const String defaultAttendanceTemplate =
       "Hurmatli ota-ona! {ism} bugun ({sana}) {sinf} sinf darsiga kelmadi.";
+  static const String defaultAttendancePresentTemplate =
+      "Hurmatli ota-ona! {ism} bugun ({sana}) {sinf} sinf darsiga keldi.";
+
+  // YANGI: Markaz uchun standart matnlar — "{sinf}" o'rniga "{guruh}"
+  // joy-belgisi ishlatiladi, chunki bu Markazning guruh/fan nomiga
+  // (masalan "Matematika-1") tegishli — "sinf" so'zi Maktabga xos va
+  // bu yerda chalkashtiradi.
+  static const String defaultCenterAttendanceTemplate =
+      "Hurmatli ota-ona! {ism} bugun ({sana}) {guruh} guruhiga kelmadi.";
+  static const String defaultCenterAttendancePresentTemplate =
+      "Hurmatli ota-ona! {ism} bugun ({sana}) {guruh} guruhiga keldi.";
+
   static const String defaultPaymentDelayTemplate =
       "Hurmatli ota-ona! {ism} uchun to'lov {kechikkanKun} kun kechikdi. Qarzdorlik: {miqdor} so'm.";
   static const String defaultExamResultTemplate =
       "Hurmatli ota-ona! {ism} \"{imtihon}\" imtihonidan {ball} natija oldi.";
-  static const String defaultPaymentReceivedTemplate = // YANGI
+  static const String defaultPaymentReceivedTemplate =
       "Hurmatli ota-ona! {ism} uchun {miqdor} so'm to'lov {sana} sanasida qabul qilindi. Rahmat!";
 
   @override
@@ -51,13 +82,22 @@ class AdminSettingsController extends GetxController {
     attendanceController.addListener(() {
       attendanceDirty.value = attendanceController.text != _originalAttendance;
     });
+    attendancePresentController.addListener(() {
+      attendancePresentDirty.value = attendancePresentController.text != _originalAttendancePresent;
+    });
+    centerAttendanceController.addListener(() { // YANGI
+      centerAttendanceDirty.value = centerAttendanceController.text != _originalCenterAttendance;
+    });
+    centerAttendancePresentController.addListener(() { // YANGI
+      centerAttendancePresentDirty.value = centerAttendancePresentController.text != _originalCenterAttendancePresent;
+    });
     paymentDelayController.addListener(() {
       paymentDelayDirty.value = paymentDelayController.text != _originalPaymentDelay;
     });
     examResultController.addListener(() {
       examResultDirty.value = examResultController.text != _originalExamResult;
     });
-    paymentReceivedController.addListener(() { // YANGI
+    paymentReceivedController.addListener(() {
       paymentReceivedDirty.value = paymentReceivedController.text != _originalPaymentReceived;
     });
   }
@@ -69,26 +109,36 @@ class AdminSettingsController extends GetxController {
       final data = doc.data() ?? {};
 
       _originalAttendance = data['attendance'] ?? defaultAttendanceTemplate;
+      _originalAttendancePresent = data['attendancePresent'] ?? defaultAttendancePresentTemplate;
+      _originalCenterAttendance = data['centerAttendance'] ?? defaultCenterAttendanceTemplate; // YANGI
+      _originalCenterAttendancePresent = data['centerAttendancePresent'] ?? defaultCenterAttendancePresentTemplate; // YANGI
       _originalPaymentDelay = data['paymentDelay'] ?? defaultPaymentDelayTemplate;
       _originalExamResult = data['examResult'] ?? defaultExamResultTemplate;
-      _originalPaymentReceived = data['paymentReceived'] ?? defaultPaymentReceivedTemplate; // YANGI
+      _originalPaymentReceived = data['paymentReceived'] ?? defaultPaymentReceivedTemplate;
 
       attendanceController.text = _originalAttendance;
+      attendancePresentController.text = _originalAttendancePresent;
+      centerAttendanceController.text = _originalCenterAttendance; // YANGI
+      centerAttendancePresentController.text = _originalCenterAttendancePresent; // YANGI
       paymentDelayController.text = _originalPaymentDelay;
       examResultController.text = _originalExamResult;
-      paymentReceivedController.text = _originalPaymentReceived; // YANGI
+      paymentReceivedController.text = _originalPaymentReceived;
     } catch (e) {
       debugPrint("SMS shablonlarni yuklashda xato: $e");
-      // Xato bo'lsa ham foydalanuvchi bo'sh ekran ko'rmasin — standart
-      // shablonlarni ko'rsatamiz, u tahrirlab saqlasa baribir Firestore'ga yoziladi.
       _originalAttendance = defaultAttendanceTemplate;
+      _originalAttendancePresent = defaultAttendancePresentTemplate;
+      _originalCenterAttendance = defaultCenterAttendanceTemplate;
+      _originalCenterAttendancePresent = defaultCenterAttendancePresentTemplate;
       _originalPaymentDelay = defaultPaymentDelayTemplate;
       _originalExamResult = defaultExamResultTemplate;
-      _originalPaymentReceived = defaultPaymentReceivedTemplate; // YANGI
+      _originalPaymentReceived = defaultPaymentReceivedTemplate;
       attendanceController.text = _originalAttendance;
+      attendancePresentController.text = _originalAttendancePresent;
+      centerAttendanceController.text = _originalCenterAttendance;
+      centerAttendancePresentController.text = _originalCenterAttendancePresent;
       paymentDelayController.text = _originalPaymentDelay;
       examResultController.text = _originalExamResult;
-      paymentReceivedController.text = _originalPaymentReceived; // YANGI
+      paymentReceivedController.text = _originalPaymentReceived;
     } finally {
       isLoading.value = false;
     }
@@ -135,6 +185,31 @@ class AdminSettingsController extends GetxController {
     dirtyFlag: attendanceDirty,
   );
 
+  Future<void> saveAttendancePresentTemplate() => _saveTemplate(
+    field: 'attendancePresent',
+    value: attendancePresentController.text,
+    savingFlag: isSavingAttendancePresent,
+    setOriginal: (v) => _originalAttendancePresent = v,
+    dirtyFlag: attendancePresentDirty,
+  );
+
+  // YANGI: Markaz shablonlarini saqlash.
+  Future<void> saveCenterAttendanceTemplate() => _saveTemplate(
+    field: 'centerAttendance',
+    value: centerAttendanceController.text,
+    savingFlag: isSavingCenterAttendance,
+    setOriginal: (v) => _originalCenterAttendance = v,
+    dirtyFlag: centerAttendanceDirty,
+  );
+
+  Future<void> saveCenterAttendancePresentTemplate() => _saveTemplate(
+    field: 'centerAttendancePresent',
+    value: centerAttendancePresentController.text,
+    savingFlag: isSavingCenterAttendancePresent,
+    setOriginal: (v) => _originalCenterAttendancePresent = v,
+    dirtyFlag: centerAttendancePresentDirty,
+  );
+
   Future<void> savePaymentDelayTemplate() => _saveTemplate(
     field: 'paymentDelay',
     value: paymentDelayController.text,
@@ -151,7 +226,7 @@ class AdminSettingsController extends GetxController {
     dirtyFlag: examResultDirty,
   );
 
-  Future<void> savePaymentReceivedTemplate() => _saveTemplate( // YANGI
+  Future<void> savePaymentReceivedTemplate() => _saveTemplate(
     field: 'paymentReceived',
     value: paymentReceivedController.text,
     savingFlag: isSavingPaymentReceived,
@@ -162,9 +237,12 @@ class AdminSettingsController extends GetxController {
   @override
   void onClose() {
     attendanceController.dispose();
+    attendancePresentController.dispose();
+    centerAttendanceController.dispose(); // YANGI
+    centerAttendancePresentController.dispose(); // YANGI
     paymentDelayController.dispose();
     examResultController.dispose();
-    paymentReceivedController.dispose(); // YANGI
+    paymentReceivedController.dispose();
     super.onClose();
   }
 }

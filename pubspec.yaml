@@ -71,6 +71,7 @@ dependencies:
   print_bluetooth_thermal: ^1.2.1
   esc_pos_utils_plus: ^2.0.4
   excel: ^4.0.6
+  url_launcher: ^6.3.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

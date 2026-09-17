@@ -46,24 +46,29 @@ class StudentPaymentController extends GetxController {
   /// tugmasini bosganda, u aynan "ma'lumot serverda o'zgargan bo'lishi
   /// mumkin, hammasini qayta tekshir" deb signal beryapti. Shu sababli
   /// delta-cursor'ga ishonib o'tirmaymiz.
-  @override
   Future<void> refresh() async {
     final synced = await _cacheService.syncPayments(studentId, forceFull: true);
-    // VAQTINCHA DEBUG — muammoni aniqlagach o'chirib tashlang:
-    debugPrint("🔍 REFRESH: studentId=$studentId, Firestore/kesh'dan qaytgan to'lovlar soni=${synced.length}");
     payments.value = synced;
-    debugPrint("🔍 REFRESH: payments.value yangilandi, hozirgi uzunlik=${payments.length}");
   }
 
   String get currentMonthKey => PaymentStatsService.monthKeyFor(DateTime.now());
 
-  // MUHIM: endi TO'LOV SANASI emas, balki "QAYSI OY UCHUN" (forMonth)
-  // maydoni tekshiriladi — chunki sentabrda avgust uchun to'lov qilingan
-  // bo'lishi mumkin, va bu holda "joriy oy to'langan" degan xulosa
-  // FAQAT forMonth == joriy_oy bo'lgandagina to'g'ri bo'ladi.
+  // MUHIM: TO'LOV SANASI emas, "QAYSI OY UCHUN" (forMonth) tekshiriladi.
   bool get hasSchoolPaymentThisMonth {
     final key = currentMonthKey;
     return payments.any((p) => p['source'] == 'school' && p['forMonth'] == key);
+  }
+
+  // YANGI: O'QUV MARKAZ uchun — FAN darajasida tekshiradi. Bitta fanga
+  // to'lansa, o'sha fandagi BARCHA guruhlar (nechta bo'lishidan qat'i
+  // nazar) "to'langan" hisoblanadi, chunki to'lov guruhga emas, FANGA
+  // biriktiriladi (forSubjectId).
+  bool hasSubjectPaymentThisMonth(String subjectId) {
+    final key = currentMonthKey;
+    return payments.any((p) =>
+    p['source'] == 'tutoring' &&
+        p['forSubjectId'] == subjectId &&
+        p['forMonth'] == key);
   }
 
   double get totalPaidThisMonth {
@@ -74,6 +79,10 @@ class StudentPaymentController extends GetxController {
   // =======================================================================
   // QO'SHISH — 1 ta atomik WriteBatch: (1) asosiy hujjat, (2) feed nusxasi,
   // (3) statistika increment (forMonth bo'yicha). 0 Read.
+  //
+  // YANGI: 'source' endi PARAMETR ('school' yoki 'tutoring'). Agar
+  // 'tutoring' bo'lsa, 'forSubjectId' MAJBURIY — bu orqali to'lov aynan
+  // FANGA (guruhga emas) biriktiriladi.
   // =======================================================================
   Future<Map<String, dynamic>?> addPayment({
     required double amount,
@@ -81,6 +90,8 @@ class StudentPaymentController extends GetxController {
     required String method,
     required String studentName,
     required String forMonthKey, // "YYYY-MM" — qaysi oy uchun to'lov
+    String source = 'school', // YANGI
+    String? forSubjectId, // YANGI — faqat source=='tutoring' bo'lsa ishlatiladi
   }) async {
     isSaving.value = true;
     try {
@@ -90,11 +101,12 @@ class StudentPaymentController extends GetxController {
       final data = {
         'amount': amount,
         'method': method,
-        'source': 'school',
+        'source': source,
         'studentName': studentName,
         'studentId': studentId,
         'isLocked': false,
         'forMonth': forMonthKey,
+        if (source == 'tutoring' && forSubjectId != null) 'forSubjectId': forSubjectId,
         'date': Timestamp.fromDate(date),
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -103,7 +115,7 @@ class StudentPaymentController extends GetxController {
       batch.set(docRef, data);
       batch.set(_feedRef(docRef.id), data);
 
-      PaymentStatsService.applyDelta(batch, amountDelta: amount, countDelta: 1, source: 'school', monthKey: forMonthKey);
+      PaymentStatsService.applyDelta(batch, amountDelta: amount, countDelta: 1, source: source, monthKey: forMonthKey);
 
       await batch.commit();
 
@@ -111,10 +123,11 @@ class StudentPaymentController extends GetxController {
         'id': docRef.id,
         'amount': amount,
         'method': method,
-        'source': 'school',
+        'source': source,
         'note': '',
         'isLocked': false,
         'forMonth': forMonthKey,
+        if (source == 'tutoring' && forSubjectId != null) 'forSubjectId': forSubjectId,
         'dateMs': date.millisecondsSinceEpoch,
       };
 
@@ -139,6 +152,7 @@ class StudentPaymentController extends GetxController {
     required DateTime newDate,
     required String newMethod,
     required String newForMonthKey,
+    String? newForSubjectId, // YANGI
   }) async {
     final index = payments.indexWhere((p) => p['id'] == paymentId);
     if (index == -1) return false;
@@ -151,6 +165,7 @@ class StudentPaymentController extends GetxController {
 
     final oldAmount = old['amount'] as double;
     final oldForMonth = old['forMonth'] as String? ?? '';
+    final source = old['source'] as String? ?? 'school';
 
     isSaving.value = true;
     try {
@@ -159,6 +174,7 @@ class StudentPaymentController extends GetxController {
         'amount': newAmount,
         'method': newMethod,
         'forMonth': newForMonthKey,
+        if (newForSubjectId != null) 'forSubjectId': newForSubjectId,
         'date': Timestamp.fromDate(newDate),
         'updatedAt': FieldValue.serverTimestamp(),
       };
@@ -167,15 +183,22 @@ class StudentPaymentController extends GetxController {
       batch.update(_feedRef(paymentId), updateData);
 
       if (oldForMonth == newForMonthKey) {
-        PaymentStatsService.applyDelta(batch, amountDelta: newAmount - oldAmount, countDelta: 0, source: 'school', monthKey: newForMonthKey);
+        PaymentStatsService.applyDelta(batch, amountDelta: newAmount - oldAmount, countDelta: 0, source: source, monthKey: newForMonthKey);
       } else {
-        PaymentStatsService.applyDelta(batch, amountDelta: -oldAmount, countDelta: -1, source: 'school', monthKey: oldForMonth);
-        PaymentStatsService.applyDelta(batch, amountDelta: newAmount, countDelta: 1, source: 'school', monthKey: newForMonthKey);
+        PaymentStatsService.applyDelta(batch, amountDelta: -oldAmount, countDelta: -1, source: source, monthKey: oldForMonth);
+        PaymentStatsService.applyDelta(batch, amountDelta: newAmount, countDelta: 1, source: source, monthKey: newForMonthKey);
       }
 
       await batch.commit();
 
-      final updated = {...old, 'amount': newAmount, 'method': newMethod, 'forMonth': newForMonthKey, 'dateMs': newDate.millisecondsSinceEpoch};
+      final updated = {
+        ...old,
+        'amount': newAmount,
+        'method': newMethod,
+        'forMonth': newForMonthKey,
+        if (newForSubjectId != null) 'forSubjectId': newForSubjectId,
+        'dateMs': newDate.millisecondsSinceEpoch,
+      };
       payments[index] = updated;
       await _cacheService.addToCache(studentId, updated);
 
@@ -203,13 +226,14 @@ class StudentPaymentController extends GetxController {
 
     final amount = payment['amount'] as double;
     final forMonth = payment['forMonth'] as String? ?? '';
+    final source = payment['source'] as String? ?? 'school';
 
     try {
       final batch = _db.batch();
       batch.delete(_paymentsRef.doc(paymentId));
       batch.delete(_feedRef(paymentId));
 
-      PaymentStatsService.applyDelta(batch, amountDelta: -amount, countDelta: -1, source: 'school', monthKey: forMonth);
+      PaymentStatsService.applyDelta(batch, amountDelta: -amount, countDelta: -1, source: source, monthKey: forMonth);
 
       await batch.commit();
 

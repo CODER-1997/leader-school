@@ -11,19 +11,21 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../controllers/school/exam_controller.dart';
-import '../../controllers/subject_student_controller.dart';
-import '../../controllers/admin_controller/admin_settings_controller.dart'; // MUHIM: sizning haqiqiy yo'lingizga moslang
-import '../../services/sms_service.dart'; // MUHIM: shu ham
+import 'package:leader_school/controllers/admin_controller/admin_settings_controller.dart'; // MUHIM: sizning haqiqiy yo'lingizga moslang
+import 'package:leader_school/services/sms_service.dart'; // MUHIM: shu ham
 
-class ExamsTabScreen extends StatelessWidget {
-  final ExamController examController;
-  final SubjectStudentsController studentsController;
+import '../../controllers/center/center_exam_controller.dart';
 
-  const ExamsTabScreen({super.key, required this.examController, required this.studentsController});
+/// O'QUV MARKAZ uchun Imtihonlar ekrani — Maktabning ExamsTabScreen
+/// dizayni bilan BIR XIL, lekin CenterExamController orqali mustaqil
+/// 'center_exams' collection bilan ishlaydi (Maktabga aloqasi yo'q).
+class CenterExamsTabScreen extends StatelessWidget {
+  final CenterExamController examController;
+  final List<Map<String, dynamic>> students;
+
+  const CenterExamsTabScreen({super.key, required this.examController, required this.students});
 
   /// Bitta dialog: yaratish HAM tahrirlash uchun ishlatiladi.
-  /// existingExam berilsa -> tahrirlash rejimi, aks holda -> yaratish rejimi.
   void _showExamDialog(BuildContext context, {Map<String, dynamic>? existingExam}) {
     final bool isEdit = existingExam != null;
 
@@ -38,11 +40,6 @@ class ExamsTabScreen extends StatelessWidget {
     Get.dialog(
       StatefulBuilder(
         builder: (context, setState) {
-          // MUHIM: butun dialog balandligi ekrandan oshib ketmasligi uchun
-          // maksimal balandlik cheklanadi va BUTUN kontent (header + maydonlar
-          // + tugmalar) bitta SingleChildScrollView'ga o'raladi. Shu bilan
-          // "sonlik" tanlanib qo'shimcha maydon chiqqanda ham, klaviatura
-          // ochilganda ham overflow bo'lmaydi — dialogning o'zi scroll bo'ladi.
           final double maxDialogHeight = MediaQuery.of(context).size.height * 0.85;
           final double keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
 
@@ -56,13 +53,7 @@ class ExamsTabScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
-                      blurRadius: 24,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 24, offset: const Offset(0, 8))],
                 ),
                 child: SingleChildScrollView(
                   padding: EdgeInsets.only(bottom: keyboardHeight),
@@ -74,10 +65,7 @@ class ExamsTabScreen extends StatelessWidget {
                         children: [
                           Container(
                             padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
+                            decoration: BoxDecoration(color: const Color(0xFF10B981).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
                             child: Icon(isEdit ? Icons.edit_note_rounded : Icons.post_add_rounded, color: const Color(0xFF10B981), size: 22),
                           ),
                           const SizedBox(width: 14),
@@ -99,29 +87,18 @@ class ExamsTabScreen extends StatelessWidget {
                           filled: true,
                           fillColor: const Color(0xFFF8FAFC),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: const BorderSide(color: Color(0xFF10B981), width: 1.5),
-                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF10B981), width: 1.5)),
                         ),
                       ),
                       const SizedBox(height: 20),
-                      const Text(
-                        "Imtihon turi",
-                        style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155), fontSize: 13),
-                      ),
+                      const Text("Imtihon turi", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155), fontSize: 13)),
                       const SizedBox(height: 10),
                       Row(
                         children: [
                           Expanded(
                             child: _ExamTypeChip(
-                              label: "Foizlik",
-                              subtitle: "0–100%",
-                              icon: Icons.percent_rounded,
+                              label: "Foizlik", subtitle: "0–100%", icon: Icons.percent_rounded,
                               selected: examType == 'foizlik',
                               onTap: () => setState(() => examType = 'foizlik'),
                             ),
@@ -129,9 +106,7 @@ class ExamsTabScreen extends StatelessWidget {
                           const SizedBox(width: 10),
                           Expanded(
                             child: _ExamTypeChip(
-                              label: "Sonlik",
-                              subtitle: "Ball asosida",
-                              icon: Icons.pin_rounded,
+                              label: "Sonlik", subtitle: "Ball asosida", icon: Icons.pin_rounded,
                               selected: examType == 'sonlik',
                               onTap: () => setState(() => examType = 'sonlik'),
                             ),
@@ -154,14 +129,8 @@ class ExamsTabScreen extends StatelessWidget {
                               filled: true,
                               fillColor: const Color(0xFFF8FAFC),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide: BorderSide.none,
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide: const BorderSide(color: Color(0xFF10B981), width: 1.5),
-                              ),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF10B981), width: 1.5)),
                             ),
                           ),
                         )
@@ -174,10 +143,7 @@ class ExamsTabScreen extends StatelessWidget {
                             child: SizedBox(
                               height: 48,
                               child: OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  side: const BorderSide(color: Color(0xFFE2E8F0)),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                ),
+                                style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFE2E8F0)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
                                 onPressed: () => Get.back(),
                                 child: const Text("Bekor qilish", style: TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
                               ),
@@ -188,47 +154,22 @@ class ExamsTabScreen extends StatelessWidget {
                             child: SizedBox(
                               height: 48,
                               child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF10B981),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                  elevation: 0,
-                                ),
+                                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0),
                                 onPressed: () async {
                                   final String name = nameController.text.trim();
                                   int qCount = int.tryParse(countController.text) ?? 0;
 
                                   if (name.isEmpty) {
-                                    Get.snackbar(
-                                      "Diqqat",
-                                      "Imtihon nomini kiriting",
-                                      backgroundColor: Colors.orange,
-                                      colorText: Colors.white,
-                                      snackPosition: SnackPosition.TOP,
-                                      margin: const EdgeInsets.all(12),
-                                      borderRadius: 12,
-                                    );
+                                    Get.snackbar("Diqqat", "Imtihon nomini kiriting", backgroundColor: Colors.orange, colorText: Colors.white, snackPosition: SnackPosition.TOP, margin: const EdgeInsets.all(12), borderRadius: 12);
                                     return;
                                   }
                                   if (examType == 'sonlik' && qCount <= 0) {
-                                    Get.snackbar(
-                                      "Diqqat",
-                                      "Savollar sonini to'g'ri kiriting",
-                                      backgroundColor: Colors.orange,
-                                      colorText: Colors.white,
-                                      snackPosition: SnackPosition.TOP,
-                                      margin: const EdgeInsets.all(12),
-                                      borderRadius: 12,
-                                    );
+                                    Get.snackbar("Diqqat", "Savollar sonini to'g'ri kiriting", backgroundColor: Colors.orange, colorText: Colors.white, snackPosition: SnackPosition.TOP, margin: const EdgeInsets.all(12), borderRadius: 12);
                                     return;
                                   }
 
                                   final int finalCount = examType == 'sonlik' ? qCount : 0;
 
-                                  // MUHIM: avval dialogni YOPAMIZ, keyin Firestore'ga
-                                  // yozishni fonda (await'siz) boshlaymiz. Real-time
-                                  // listener natijani baribir avtomatik ko'rsatadi —
-                                  // shuning uchun tugma tarmoq javobini kutib turishi
-                                  // shart emas, dialog darhol yopiladi.
                                   Navigator.pop(context);
 
                                   if (isEdit) {
@@ -258,46 +199,26 @@ class ExamsTabScreen extends StatelessWidget {
     Get.bottomSheet(
       Container(
         padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
-              ),
-            ),
+            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)))),
             const SizedBox(height: 20),
             Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFDC2626).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+                  decoration: BoxDecoration(color: const Color(0xFFDC2626).withOpacity(0.1), borderRadius: BorderRadius.circular(14)),
                   child: const Icon(Icons.delete_outline_rounded, color: Color(0xFFDC2626), size: 24),
                 ),
                 const SizedBox(width: 16),
-                const Expanded(
-                  child: Text(
-                    "Imtihonni o'chirish",
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-                  ),
-                ),
+                const Expanded(child: Text("Imtihonni o'chirish", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)))),
               ],
             ),
             const SizedBox(height: 12),
-            Text(
-              "\"$examName\" imtihonini o'chirmoqchimisiz? Barcha natijalar ham butunlay o'chib ketadi.",
-              style: const TextStyle(fontSize: 14, color: Color(0xFF64748B), height: 1.4),
-            ),
+            Text("\"$examName\" imtihonini o'chirmoqchimisiz? Barcha natijalar ham butunlay o'chib ketadi.", style: const TextStyle(fontSize: 14, color: Color(0xFF64748B), height: 1.4)),
             const SizedBox(height: 24),
             Row(
               children: [
@@ -305,10 +226,7 @@ class ExamsTabScreen extends StatelessWidget {
                   child: SizedBox(
                     height: 48,
                     child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFFCBD5E1)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
+                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFCBD5E1)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
                       onPressed: () => Get.back(),
                       child: const Text("Bekor qilish", style: TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
                     ),
@@ -319,11 +237,7 @@ class ExamsTabScreen extends StatelessWidget {
                   child: SizedBox(
                     height: 48,
                     child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFDC2626),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        elevation: 0,
-                      ),
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0),
                       onPressed: () async {
                         await examController.deleteExam(exam['id']);
                         Get.back();
@@ -348,20 +262,37 @@ class ExamsTabScreen extends StatelessWidget {
       child: Column(
         children: [
           Expanded(
-            // StreamBuilder O'RNIGA Obx — ExamController ichida real-time
-            // listener bor, u classExams'ni yangilaydi, bu yerda esa faqat
-            // shu observable'ga qarab UI qayta chiziladi.
             child: Obx(() {
               if (examController.isLoading.value && examController.classExams.isEmpty) {
                 return const Center(child: CircularProgressIndicator(color: Color(0xFF10B981), strokeWidth: 2.5));
               }
 
+              if (examController.errorMessage.value != null) {
+                return Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: const Color(0xFFFEF2F2), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFFECACA))),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 18),
+                            SizedBox(width: 8),
+                            Text("Imtihonlarni yuklashda xato", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFDC2626), fontSize: 13)),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        SelectableText(examController.errorMessage.value!, style: const TextStyle(fontSize: 11.5, color: Color(0xFF991B1B), fontFamily: 'monospace')),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
               final exams = examController.classExams;
 
-              // RefreshIndicator — qo'shimcha kafolat sifatida (real-time
-              // listener normal holatda o'zi push qiladi, pastga tortish
-              // shart emas, lekin uzoq fonda turgandan keyin ulanishni
-              // yangilash uchun qulay).
               return RefreshIndicator(
                 color: const Color(0xFF10B981),
                 onRefresh: examController.refresh,
@@ -377,23 +308,13 @@ class ExamsTabScreen extends StatelessWidget {
                           children: [
                             Container(
                               padding: const EdgeInsets.all(20),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF10B981).withOpacity(0.08),
-                                shape: BoxShape.circle,
-                              ),
+                              decoration: BoxDecoration(color: const Color(0xFF10B981).withOpacity(0.08), shape: BoxShape.circle),
                               child: const Icon(Icons.assignment_outlined, size: 40, color: Color(0xFF10B981)),
                             ),
                             const SizedBox(height: 16),
-                            const Text(
-                              "Hozircha imtihonlar yo'q",
-                              style: TextStyle(color: Color(0xFF334155), fontSize: 15, fontWeight: FontWeight.w600),
-                            ),
+                            const Text("Hozircha imtihonlar yo'q", style: TextStyle(color: Color(0xFF334155), fontSize: 15, fontWeight: FontWeight.w600)),
                             const SizedBox(height: 4),
-                            const Text(
-                              "Pastdagi tugma orqali birinchi imtihonni yarating",
-                              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
-                              textAlign: TextAlign.center,
-                            ),
+                            const Text("Pastdagi tugma orqali birinchi imtihonni yarating", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13), textAlign: TextAlign.center),
                           ],
                         ),
                       ),
@@ -418,13 +339,13 @@ class ExamsTabScreen extends StatelessWidget {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(18),
                         onTap: () {
-                          Get.to(() => ExamScoresScreen(
+                          Get.to(() => CenterExamScoresScreen(
                             examId: examId,
                             examName: examName,
                             examType: examType,
                             questionCount: questionCount,
                             examController: examController,
-                            studentsController: studentsController,
+                            students: students,
                           ));
                         },
                         child: Container(
@@ -434,21 +355,14 @@ class ExamsTabScreen extends StatelessWidget {
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(18),
                             border: Border.all(color: const Color(0xFFEEF2F6)),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 3)),
-                            ],
+                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 3))],
                           ),
                           child: Row(
                             children: [
                               Container(
-                                height: 48,
-                                width: 48,
+                                height: 48, width: 48,
                                 decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [const Color(0xFF10B981).withOpacity(0.15), const Color(0xFF10B981).withOpacity(0.06)],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
+                                  gradient: LinearGradient(colors: [const Color(0xFF10B981).withOpacity(0.15), const Color(0xFF10B981).withOpacity(0.06)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                                 child: const Icon(Icons.assignment_turned_in_rounded, color: Color(0xFF10B981), size: 22),
@@ -458,31 +372,19 @@ class ExamsTabScreen extends StatelessWidget {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      examName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E293B), fontSize: 15.5),
-                                    ),
+                                    Text(examName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E293B), fontSize: 15.5)),
                                     const SizedBox(height: 4),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: examType == 'sonlik' ? const Color(0xFFEFF6FF) : const Color(0xFFECFDF5),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
+                                      decoration: BoxDecoration(color: examType == 'sonlik' ? const Color(0xFFEFF6FF) : const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(6)),
                                       child: Text(
                                         examType == 'sonlik' ? "Sonlik · $questionCount ta savol" : "Foizlik",
-                                        style: TextStyle(
-                                          color: examType == 'sonlik' ? const Color(0xFF3B82F6) : const Color(0xFF10B981),
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                        style: TextStyle(color: examType == 'sonlik' ? const Color(0xFF3B82F6) : const Color(0xFF10B981), fontSize: 11.5, fontWeight: FontWeight.w600),
                                       ),
                                     ),
-                                    // YANGI: SMS yuborilganini ro'yxatdan
-                                    // ko'rsatamiz — boshqa o'qituvchi
-                                    // qayta yuborib yubormasin.
+                                    // YANGI: SMS yuborilganini boshqa
+                                    // o'qituvchi/admin ham ro'yxatdan
+                                    // KO'RSIN — qayta yuborib yubormasin.
                                     if (smsSentAt != null) ...[
                                       const SizedBox(height: 4),
                                       Row(
@@ -491,7 +393,7 @@ class ExamsTabScreen extends StatelessWidget {
                                           const SizedBox(width: 4),
                                           Text(
                                             "SMS yuborilgan: ${DateFormat('dd.MM.yyyy HH:mm').format(smsSentAt.toDate())}",
-                                            style: const TextStyle(fontSize: 10.5, color: Color(0xFF3B82F6), fontWeight: FontWeight.bold),
+                                            style: const TextStyle(fontSize: 10.5, color: Color(0xFF3B82F6), fontWeight: FontWeight.w600),
                                           ),
                                         ],
                                       ),
@@ -510,26 +412,8 @@ class ExamsTabScreen extends StatelessWidget {
                                   }
                                 },
                                 itemBuilder: (context) => [
-                                  const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.edit_outlined, size: 18, color: Color(0xFF3B82F6)),
-                                        SizedBox(width: 10),
-                                        Text("Tahrirlash"),
-                                      ],
-                                    ),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFDC2626)),
-                                        SizedBox(width: 10),
-                                        Text("O'chirish", style: TextStyle(color: Color(0xFFDC2626))),
-                                      ],
-                                    ),
-                                  ),
+                                  const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit_outlined, size: 18, color: Color(0xFF3B82F6)), SizedBox(width: 10), Text("Tahrirlash")])),
+                                  const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFDC2626)), SizedBox(width: 10), Text("O'chirish", style: TextStyle(color: Color(0xFFDC2626)))])),
                                 ],
                               ),
                             ],
@@ -542,22 +426,14 @@ class ExamsTabScreen extends StatelessWidget {
               );
             }),
           ),
-
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              border: Border(top: BorderSide(color: Colors.grey.shade200)),
-            ),
+            decoration: BoxDecoration(color: const Color(0xFFF8FAFC), border: Border(top: BorderSide(color: Colors.grey.shade200))),
             child: SizedBox(
               width: double.infinity,
               height: 52,
               child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 0,
-                ),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
                 onPressed: () => _showExamDialog(context),
                 icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white),
                 label: const Text("Yangi imtihon qo'shish", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15.5)),
@@ -570,7 +446,6 @@ class ExamsTabScreen extends StatelessWidget {
   }
 }
 
-/// Imtihon turini tanlash uchun chiroyli chip komponenti (faqat dizayn uchun)
 class _ExamTypeChip extends StatelessWidget {
   final String label;
   final String subtitle;
@@ -578,13 +453,7 @@ class _ExamTypeChip extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  const _ExamTypeChip({
-    required this.label,
-    required this.subtitle,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
+  const _ExamTypeChip({required this.label, required this.subtitle, required this.icon, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -603,19 +472,9 @@ class _ExamTypeChip extends StatelessWidget {
           children: [
             Icon(icon, size: 20, color: selected ? const Color(0xFF10B981) : const Color(0xFF94A3B8)),
             const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.bold,
-                color: selected ? const Color(0xFF10B981) : const Color(0xFF334155),
-              ),
-            ),
+            Text(label, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: selected ? const Color(0xFF10B981) : const Color(0xFF334155))),
             const SizedBox(height: 2),
-            Text(
-              subtitle,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-            ),
+            Text(subtitle, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
           ],
         ),
       ),
@@ -623,8 +482,6 @@ class _ExamTypeChip extends StatelessWidget {
   }
 }
 
-/// Kiritilgan qiymatni maksimal ruxsat etilgan sondan oshirmaydi va
-/// keraksiz yetakchi nollarni ("036" -> "36") avtomatik tozalaydi.
 class _MaxValueInputFormatter extends TextInputFormatter {
   final int max;
   _MaxValueInputFormatter(this.max);
@@ -634,7 +491,6 @@ class _MaxValueInputFormatter extends TextInputFormatter {
     String text = newValue.text;
     if (text.isEmpty) return newValue;
 
-    // Yetakchi nollarni olib tashlaymiz, lekin yagona "0" bo'lsa saqlab qolamiz.
     if (text.length > 1 && text.startsWith('0')) {
       text = text.replaceFirst(RegExp(r'^0+'), '');
       if (text.isEmpty) text = '0';
@@ -644,82 +500,79 @@ class _MaxValueInputFormatter extends TextInputFormatter {
     if (value == null) return oldValue;
     if (max > 0 && value > max) return oldValue;
 
-    return TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
+    return TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
   }
 }
 
 // =====================================================================
-// NATIJALAR EKRANI — Firestore'dan hech qanday qo'shimcha read qilmaydi:
-// boshlang'ich ballar controller cache'idan olinadi (0 Read), saqlashda
-// esa BARCHA o'zgarishlar bitta write bilan yuboriladi.
+// NATIJALAR EKRANI — O'quv Markaz uchun mustaqil, lekin Maktabdagi bilan
+// bir xil UX: 0 Read (cache'dan), bitta write bilan saqlash, dirty-state
+// ko'rsatkichlari, avtomatik tanlash, chiqishdan oldin ogohlantirish.
 // =====================================================================
-class ExamScoresScreen extends StatefulWidget {
+class CenterExamScoresScreen extends StatefulWidget {
   final String examId;
   final String examName;
   final String examType;
   final int questionCount;
-  final ExamController examController;
-  final SubjectStudentsController studentsController;
+  final CenterExamController examController;
+  final List<Map<String, dynamic>> students;
 
-  const ExamScoresScreen({
+  const CenterExamScoresScreen({
     super.key,
     required this.examId,
     required this.examName,
     required this.examType,
     required this.questionCount,
     required this.examController,
-    required this.studentsController,
+    required this.students,
   });
 
   @override
-  State<ExamScoresScreen> createState() => _ExamScoresScreenState();
+  State<CenterExamScoresScreen> createState() => _CenterExamScoresScreenState();
 }
 
-class _ExamScoresScreenState extends State<ExamScoresScreen> {
+class _CenterExamScoresScreenState extends State<CenterExamScoresScreen> {
   final Map<String, TextEditingController> _controllers = {};
   final Map<String, FocusNode> _focusNodes = {};
   final Map<String, String> _originalScores = {};
   final Set<String> _dirtyIds = {};
-
   bool _isSaving = false;
-  bool _isSendingSms = false; // YANGI
+  bool _isSendingSms = false;
 
-  int get _maxValue => widget.examType == 'sonlik' ? widget.questionCount : 100;
-
-  // YANGI: sessiyaga bog'liq emas — hozir yoki oldin kamida bitta ball
-  // kiritilgan bo'lsa, pastdagi tugmalar ko'rinadi.
+  // YANGI: sessiyaga bog'liq emas — agar HOZIR yoki OLDIN (boshqa
+  // safar) kamida bitta ball kiritilgan bo'lsa, tugmalar ko'rinadi.
   bool get _hasAnyResults => _controllers.values.any((c) => c.text.trim().isNotEmpty);
 
   // YANGI: SMS allaqachon yuborilganini imtihon hujjatining o'zidan
-  // (real-time) o'qiydi.
+  // (real-time) o'qiydi — shu bilan boshqa o'qituvchi yuborgan bo'lsa
+  // ham darhol ko'rinadi.
   Map<String, dynamic>? get _smsStatus {
     final exam = widget.examController.getExam(widget.examId);
     return exam?['smsStatus'] as Map<String, dynamic>?;
   }
 
+  // TEST REJIMI: boshqa SMS funksiyalari kabi, hozircha BARCHA SMS shu
+  // raqamga yuboriladi. Test tugagach, _sendResultsSms() ichida
+  // student['parentPhone']'ga almashtiring.
+
+  int get _maxValue => widget.examType == 'sonlik' ? widget.questionCount : 100;
+
   @override
   void initState() {
     super.initState();
-    _loadScores(); // Firestore'ga tegmaydi — controller cache'idan darhol
+    _loadScores();
   }
 
   void _loadScores() {
     final exam = widget.examController.getExam(widget.examId);
     final Map<String, dynamic> scores = Map<String, dynamic>.from(exam?['scores'] ?? {});
 
-    for (final student in widget.studentsController.classStudents) {
+    for (final student in widget.students) {
       final String studentId = student['id'];
       final String value = scores[studentId]?.toString() ?? '';
       _originalScores[studentId] = value;
       _controllers[studentId] = TextEditingController(text: value);
 
-      // MUHIM: maydonga bosilganda mavjud qiymat AVTOMATIK tanlanadi —
-      // shunda foydalanuvchi yozganda eski raqam ustiga QO'SHILMAY,
-      // TO'LIQ ALMASHTIRILADI. Buning yo'qligi "036", "9600" kabi
-      // buzuq/qo'shilib ketgan raqamlar kiritilishiga sabab bo'lgan edi.
       final focusNode = FocusNode();
       focusNode.addListener(() {
         if (focusNode.hasFocus) {
@@ -772,7 +625,6 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
     });
   }
 
-  // Barcha o'quvchilarning JORIY ballarini yig'ib, BITTA write bilan yuboradi.
   Future<void> _saveAll() async {
     if (_dirtyIds.isEmpty || _isSaving) return;
     setState(() => _isSaving = true);
@@ -798,50 +650,27 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
         _isSaving = false;
       });
 
-      Get.snackbar(
-        "Saqlandi",
-        "Natijalar muvaffaqiyatli saqlandi",
-        backgroundColor: const Color(0xFF10B981),
-        colorText: Colors.white,
-        snackPosition: SnackPosition.TOP,
-        margin: const EdgeInsets.all(12),
-        borderRadius: 12,
-      );
+      Get.snackbar("Saqlandi", "Natijalar muvaffaqiyatli saqlandi", backgroundColor: const Color(0xFF10B981), colorText: Colors.white, snackPosition: SnackPosition.TOP, margin: const EdgeInsets.all(12), borderRadius: 12);
     } catch (_) {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  Future<bool> _confirmLeaveIfDirty() async {
-    if (_dirtyIds.isEmpty) return true;
-
-    final bool? shouldLeave = await Get.dialog<bool>(
-      AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text("Saqlanmagan o'zgarishlar", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-        content: const Text(
-          "Ba'zi natijalar hali saqlanmagan. Saqlamasdan chiqishni xohlaysizmi?",
-          style: TextStyle(color: Color(0xFF64748B)),
-        ),
-        actions: [
-          TextButton(onPressed: () => Get.back(result: false), child: const Text("Bekor qilish")),
-          TextButton(
-            onPressed: () => Get.back(result: true),
-            child: const Text("Chiqish", style: TextStyle(color: Color(0xFFDC2626))),
-          ),
-        ],
-      ),
-    );
-    return shouldLeave ?? false;
+  String _capitalizeWord(String text) {
+    if (text.isEmpty) return '';
+    return text.trim().split(' ').map((word) {
+      if (word.isEmpty) return '';
+      return word[0].toUpperCase() + word.substring(1).toLowerCase();
+    }).join(' ');
   }
 
   // =======================================================================
-  // YANGI: NATIJALARNI OTA-ONAGA SMS ORQALI YUBORISH — har bir o'quvchining
+  // NATIJALARNI OTA-ONAGA SMS ORQALI YUBORISH — har bir o'quvchining
   // O'ZINING ballini o'zining ota-onasiga alohida SMS qilib yuboradi.
-  // Agar SMS ALLAQACHON yuborilgan bo'lsa (hatto BOSHQA o'qituvchi
-  // tomonidan), avval TASDIQLASH so'raladi.
+  // MUHIM: agar bu imtihon uchun SMS ALLAQACHON yuborilgan bo'lsa (hatto
+  // BOSHQA o'qituvchi tomonidan), avval TASDIQLASH so'raladi — ota-onani
+  // qayta-qayta bezovta qilmaslik uchun.
   // =======================================================================
-
   Future<void> _sendResultsSms() async {
     final existingStatus = _smsStatus;
     if (existingStatus != null) {
@@ -879,19 +708,19 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
       int successCount = 0;
       int failCount = 0;
 
-      for (final student in widget.studentsController.classStudents) {
+      for (final student in widget.students) {
         final studentId = student['id'];
         final scoreText = _controllers[studentId]?.text ?? '';
-        if (scoreText.isEmpty) continue;
+        if (scoreText.isEmpty) continue; // ball kiritilmagan o'quvchiga yubormaymiz
 
-        final fullName = "${_capitalize(student['lastName'] ?? '')} ${_capitalize(student['firstName'] ?? '')}".trim();
+        final fullName = "${_capitalizeWord(student['lastName'] ?? '')} ${_capitalizeWord(student['firstName'] ?? '')}".trim();
         final resultLabel = widget.examType == 'sonlik' ? "$scoreText/${widget.questionCount}" : "$scoreText%";
 
         final message = template
             .replaceAll('{ism}', fullName.isEmpty ? (student['name'] ?? '') : fullName)
             .replaceAll('{imtihon}', widget.examName)
             .replaceAll('{ball}', resultLabel)
-            .replaceAll('{natija}', resultLabel)
+            .replaceAll('{natija}', resultLabel) // MUHIM: ba'zi shablonlar {natija} ishlatishi mumkin — ikkalasi ham qoplanadi
             .replaceAll('{sana}', today);
 
         // TEST REJIMI — real ishga tushirishda pastdagi qatorni
@@ -907,6 +736,8 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
         }
       }
 
+      // YANGI: yuborilgan holatni imtihon hujjatida BELGILAYMIZ — shu
+      // bilan boshqa o'qituvchi ham ro'yxatdan ko'radi.
       if (successCount > 0) {
         await widget.examController.markSmsSent(widget.examId);
       }
@@ -925,12 +756,13 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
   }
 
   // =======================================================================
-  // YANGI: NATIJALARNI RASM SIFATIDA ULASHISH — xom UI skrinshoti EMAS,
-  // natijaga qarab SARALANGAN, alohida qurilgan poster.
+  // NATIJALARNI RASM SIFATIDA ULASHISH — xom UI skrinshoti EMAS, balki
+  // natijaga qarab SARALANGAN, chiroyli tartibga solingan alohida
+  // "Natijalar" posteri ochiladi (o'sha yerdan ulashiladi).
   // =======================================================================
   void _shareResultsAsImage() {
     final List<Map<String, dynamic>> ranked = [];
-    for (final student in widget.studentsController.classStudents) {
+    for (final student in widget.students) {
       final id = student['id'];
       final text = _controllers[id]?.text.trim() ?? '';
       if (text.isEmpty) continue;
@@ -943,6 +775,7 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
       return;
     }
 
+    // Yuqoridan pastga — eng yuqori balldan boshlab.
     ranked.sort((a, b) => (b['_score'] as double).compareTo(a['_score'] as double));
 
     Get.dialog(
@@ -956,9 +789,40 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
     );
   }
 
+  Future<bool> _confirmLeaveIfDirty() async {
+    if (_dirtyIds.isEmpty) return true;
+
+    final bool? shouldLeave = await Get.dialog<bool>(
+      AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text("Saqlanmagan o'zgarishlar", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+        content: const Text("Ba'zi natijalar hali saqlanmagan. Saqlamasdan chiqishni xohlaysizmi?", style: TextStyle(color: Color(0xFF64748B))),
+        actions: [
+          TextButton(onPressed: () => Get.back(result: false), child: const Text("Bekor qilish")),
+          TextButton(onPressed: () => Get.back(result: true), child: const Text("Chiqish", style: TextStyle(color: Color(0xFFDC2626)))),
+        ],
+      ),
+    );
+    return shouldLeave ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final cachedStudents = widget.studentsController.classStudents;
+    final cachedStudents = widget.students;
+    cachedStudents.sort((a, b) {
+      // Avval familiya bo'yicha solishtiramiz
+      String lastNameA = (a['lastName'] ?? '').toLowerCase();
+      String lastNameB = (b['lastName'] ?? '').toLowerCase();
+      int compareResult = lastNameA.compareTo(lastNameB);
+
+      // Agar familiyalari bir xil bo'lsa, ism bo'yicha solishtiramiz
+      if (compareResult == 0) {
+        String firstNameA = (a['firstName'] ?? '').toLowerCase();
+        String firstNameB = (b['firstName'] ?? '').toLowerCase();
+        compareResult = firstNameA.compareTo(firstNameB);
+      }
+      return compareResult;
+    });
 
     return PopScope(
       canPop: _dirtyIds.isEmpty,
@@ -991,24 +855,12 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
                 padding: const EdgeInsets.only(right: 14),
                 child: Center(
                   child: _isSaving
-                      ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2.2, color: Color(0xFF10B981)),
-                  )
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: Color(0xFF10B981)))
                       : ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      elevation: 0,
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), padding: const EdgeInsets.symmetric(horizontal: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
                     onPressed: _saveAll,
                     icon: const Icon(Icons.save_rounded, size: 18, color: Colors.white),
-                    label: Text(
-                      "Saqlash (${_dirtyIds.length})",
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
+                    label: Text("Saqlash (${_dirtyIds.length})", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                   ),
                 ),
               ),
@@ -1021,14 +873,11 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
             children: [
               Container(
                 padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF94A3B8).withOpacity(0.08),
-                  shape: BoxShape.circle,
-                ),
+                decoration: BoxDecoration(color: const Color(0xFF94A3B8).withOpacity(0.08), shape: BoxShape.circle),
                 child: const Icon(Icons.people_outline_rounded, size: 40, color: Color(0xFF94A3B8)),
               ),
               const SizedBox(height: 16),
-              const Text("Sinfda o'quvchilar yo'q", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+              const Text("Guruhda o'quvchilar yo'q", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
             ],
           ),
         )
@@ -1056,9 +905,7 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: isDirty ? const Color(0xFF10B981).withOpacity(0.5) : const Color(0xFFEEF2F6), width: isDirty ? 1.4 : 1),
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 8, offset: const Offset(0, 2)),
-                ],
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 8, offset: const Offset(0, 2))],
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1069,28 +916,16 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
                         CircleAvatar(
                           radius: 17,
                           backgroundColor: color.withOpacity(0.12),
-                          child: Text(
-                            "${index + 1}",
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color),
-                          ),
+                          child: Text("${index + 1}", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color)),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Text(
-                            studentName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
-                          ),
+                          child: Text(studentName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF1E293B))),
                         ),
                         if (isDirty)
                           Padding(
                             padding: const EdgeInsets.only(left: 6),
-                            child: Container(
-                              width: 7,
-                              height: 7,
-                              decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle),
-                            ),
+                            child: Container(width: 7, height: 7, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
                           ),
                       ],
                     ),
@@ -1104,10 +939,7 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
                       focusNode: _focusNodes[studentId],
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        _MaxValueInputFormatter(_maxValue),
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly, _MaxValueInputFormatter(_maxValue)],
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color),
                       decoration: InputDecoration(
                         hintText: widget.examType == 'sonlik' ? "Ball" : "%",
@@ -1115,18 +947,9 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
                         filled: true,
                         fillColor: color.withOpacity(0.06),
                         contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 4),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: color.withOpacity(0.25)),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: color.withOpacity(0.25)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: color, width: 1.5),
-                        ),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: color.withOpacity(0.25))),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: color.withOpacity(0.25))),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: color, width: 1.5)),
                       ),
                       onChanged: (value) => _onScoreChanged(studentId, value),
                     ),
@@ -1136,8 +959,6 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
             );
           },
         ),
-        // YANGI: SMS + Natijalar rasmi tugmalari — natija kiritilgan
-        // bo'lsagina (sessiyadan mustaqil) ko'rinadi.
         bottomNavigationBar: _hasAnyResults
             ? Container(
           padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(context).padding.bottom + 12),
@@ -1148,6 +969,8 @@ class _ExamScoresScreenState extends State<ExamScoresScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // YANGI: SMS allaqachon yuborilgan bo'lsa — buni ANIQ
+              // ko'rsatamiz (boshqa o'qituvchi yuborgan bo'lsa ham).
               if (_smsStatus != null) ...[
                 Container(
                   width: double.infinity,
@@ -1218,7 +1041,7 @@ class _ResultsPosterDialog extends StatefulWidget {
   final String examName;
   final String examType;
   final int questionCount;
-  final List<Map<String, dynamic>> rankedStudents;
+  final List<Map<String, dynamic>> rankedStudents; // saralangan, '_score'/'_scoreText' bilan
 
   const _ResultsPosterDialog({
     required this.examName,
@@ -1252,7 +1075,7 @@ class _ResultsPosterDialogState extends State<_ResultsPosterDialog> {
       case 3:
         return "🥉";
       default:
-        return "$position";
+        return "${position}";
     }
   }
 
@@ -1313,6 +1136,7 @@ class _ResultsPosterDialogState extends State<_ResultsPosterDialog> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // --- SARLAVHA ---
                           Center(
                             child: Column(
                               children: [
@@ -1334,6 +1158,8 @@ class _ResultsPosterDialogState extends State<_ResultsPosterDialog> {
                           const SizedBox(height: 20),
                           Container(height: 1, color: const Color(0xFFE2E8F0)),
                           const SizedBox(height: 16),
+
+                          // --- SARALANGAN RO'YXAT ---
                           ...widget.rankedStudents.asMap().entries.map((entry) {
                             final position = entry.key + 1;
                             final student = entry.value;
@@ -1364,6 +1190,7 @@ class _ResultsPosterDialogState extends State<_ResultsPosterDialog> {
                               ),
                             );
                           }),
+
                           const SizedBox(height: 16),
                           Container(height: 1, color: const Color(0xFFE2E8F0)),
                           const SizedBox(height: 10),
@@ -1376,6 +1203,8 @@ class _ResultsPosterDialogState extends State<_ResultsPosterDialog> {
                   ),
                 ),
               ),
+
+              // --- HARAKAT TUGMALARI (posterning o'zi rasmga olinmaydi) ---
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                 child: Row(

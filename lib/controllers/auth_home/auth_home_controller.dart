@@ -11,7 +11,7 @@ class HomeViewController extends GetxController {
   final TextEditingController roleIdController = TextEditingController();
   final RxString userRole = "".obs; // "admin", "teacher", yoki ""
   final RxBool isObscured = true.obs;
-  final RxBool isChecking = false.obs;
+  final RxBool isChecking = false.obs;  
 
   @override
   void onInit() {

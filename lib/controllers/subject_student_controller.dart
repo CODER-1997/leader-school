@@ -27,7 +27,11 @@ class SubjectStudentsController extends GetxController {
   var isSaving = false.obs;
   var hasUnsavedChanges = false.obs;
 
-  String? _todayDocId;
+  // YANGI: hozir qaysi sananing davomati ko'rsatilmoqda/tahrirlanmoqda.
+  // Avval bu ekran FAQAT "bugun" bilan ishlar edi.
+  var selectedDate = DateTime.now().obs;
+
+  String? _todayDocId; // MUHIM: nomi saqlanib qoldi, endi "tanlangan sana"ning hujjat ID'sini bildiradi
 
   SubjectStudentsController({required this.subjectId, required this.classId});
 
@@ -35,7 +39,7 @@ class SubjectStudentsController extends GetxController {
   void onInit() {
     super.onInit();
     _loadStudentsFromCache();   // 0 read
-    _loadTodayAttendanceOnce(); // 1 read (yoki 0, agar hali hujjat yo'q bo'lsa)
+    _loadAttendanceForSelectedDate();
   }
 
   // ============================================================
@@ -44,8 +48,6 @@ class SubjectStudentsController extends GetxController {
   void _loadStudentsFromCache() {
     try {
       if (!Get.isRegistered<CrmController>()) {
-        // Agar biror sabab bilan hali yaratilmagan bo'lsa, xato bermaymiz,
-        // shunchaki bo'sh ro'yxat bilan boshlaymiz
         classStudents.value = [];
         return;
       }
@@ -53,8 +55,6 @@ class SubjectStudentsController extends GetxController {
       final crm = Get.find<CrmController>();
 
       if (crm.allStudents.isEmpty) {
-        // Cache hali yuklanmagan bo'lishi mumkin (masalan ilova endi ochilgan)
-        // Xavfsizlik uchun 1 martalik server so'rovi bilan zaxira variant
         _fallbackFetchFromServer();
         return;
       }
@@ -68,7 +68,6 @@ class SubjectStudentsController extends GetxController {
     }
   }
 
-  // Faqat CrmController cache bo'sh bo'lgan holatlar uchun zaxira — bitta filtrlangan so'rov
   Future<void> _fallbackFetchFromServer() async {
     try {
       isLoading.value = true;
@@ -94,13 +93,15 @@ class SubjectStudentsController extends GetxController {
   }
 
   // ============================================================
-  // 2. DAVOMAT — bugungi hujjatni FAQAT 1 marta o'qiymiz (real-time emas)
+  // 2. DAVOMAT — endi TANLANGAN SANA uchun (avval faqat "bugun").
   // ============================================================
-  Future<void> _loadTodayAttendanceOnce() async {
+  String _dateKeyFor(DateTime d) => d.toIso8601String().split('T')[0];
+
+  Future<void> _loadAttendanceForSelectedDate() async {
     try {
       isLoading.value = true;
-      final today = DateTime.now().toIso8601String().split('T')[0];
-      _todayDocId = '${subjectId}_$today';
+      final dateKey = _dateKeyFor(selectedDate.value);
+      _todayDocId = '${subjectId}_$dateKey';
 
       final doc = await _db.collection('attendance').doc(_todayDocId).get();
 
@@ -111,10 +112,15 @@ class SubjectStudentsController extends GetxController {
           attendanceMap.value = records.map(
                 (key, value) => MapEntry(key, value == true),
           );
+        } else {
+          attendanceMap.clear();
         }
       } else {
         attendanceMap.clear();
       }
+      // YANGI: yangi sana endigina yuklandi — hali hech qanday
+      // tahrirlanmagan o'zgarish yo'q.
+      hasUnsavedChanges.value = false;
     } catch (e) {
       Get.snackbar(
         "Xatolik",
@@ -134,23 +140,22 @@ class SubjectStudentsController extends GetxController {
     hasUnsavedChanges.value = true;
   }
 
-  // Faqat "Saqlash" tugmasi bosilganda — bitta yagona write
+  // Faqat "Saqlash" chaqirilganda (endi avtomatik, tugma orqali emas) — bitta yagona write
   Future<void> saveAttendance() async {
     if (!hasUnsavedChanges.value) {
-      Get.snackbar("Diqqat", "Hech narsa o'zgarmagan", backgroundColor: Colors.orange, colorText: Colors.white);
       return;
     }
 
     try {
       isSaving.value = true;
-      final today = DateTime.now().toIso8601String().split('T')[0];
-      _todayDocId = '${subjectId}_$today';
+      final dateKey = _dateKeyFor(selectedDate.value);
+      _todayDocId = '${subjectId}_$dateKey';
 
       await _db.collection('attendance').doc(_todayDocId).set({
         'subjectId': subjectId,
         'classId': classId,
-        'date': today,
-        'records': attendanceMap, // butun map bitta marta yoziladi
+        'date': dateKey,
+        'records': attendanceMap,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -174,6 +179,36 @@ class SubjectStudentsController extends GetxController {
     } finally {
       isSaving.value = false;
     }
+  }
+
+  // =======================================================================
+  // YANGI: SANANI ALMASHTIRISH — joriy sanadagi saqlanmagan o'zgarishlar
+  // BOR bo'lsa, AVVAL avtomatik saqlanadi, so'ng yangi sananing davomati
+  // yuklanadi.
+  // =======================================================================
+  Future<void> changeDate(DateTime newDate) async {
+    if (hasUnsavedChanges.value) {
+      await saveAttendance();
+    }
+    selectedDate.value = DateTime(newDate.year, newDate.month, newDate.day);
+    await _loadAttendanceForSelectedDate();
+  }
+
+  Future<void> goToPreviousDay() => changeDate(selectedDate.value.subtract(const Duration(days: 1)));
+
+  /// Kelajakka o'tishga RUXSAT BERILMAYDI.
+  Future<void> goToNextDay() async {
+    final nextDay = selectedDate.value.add(const Duration(days: 1));
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+    if (nextDay.isAfter(todayDateOnly)) return;
+    await changeDate(nextDay);
+  }
+
+  bool get isViewingToday {
+    final today = DateTime.now();
+    final d = selectedDate.value;
+    return d.year == today.year && d.month == today.month && d.day == today.day;
   }
 
   // ============================================================
@@ -220,7 +255,6 @@ class SubjectStudentsController extends GetxController {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      // Yangi o'quvchini asosiy cache'ga ham qo'shamiz — qayta fetch qilmaslik uchun
       final newStudent = {
         'id': docRef.id,
         'classId': classId,
@@ -250,69 +284,7 @@ class SubjectStudentsController extends GetxController {
       debugPrint('O\'quvchi qo\'shish xatosi: $e');
     }
   }
-// Test uchun demo o'quvchilar qo'shish funksiyasi
-  Future<void> addDemoStudents() async {
-    try {
-      isLoading.value = true;
 
-      // Test uchun ismlar va familiyalar ro'yxati
-      List<Map<String, dynamic>> demoData = [
-        {'firstName': 'Anvar', 'lastName': 'Aliyev', 'isPrivileged': true},
-        {'firstName': 'Jasur', 'lastName': 'Karimov', 'isPrivileged': false},
-        {'firstName': 'Madina', 'lastName': 'Saidova', 'isPrivileged': true},
-        {'firstName': 'Bobur', 'lastName': 'Tohirov', 'isPrivileged': false},
-        {'firstName': 'Zuxra', 'lastName': 'Valiyeva', 'isPrivileged': false},
-        {'firstName': 'Sardor', 'lastName': 'Nazarov', 'isPrivileged': true},
-        {'firstName': 'Dilnoza', 'lastName': 'Ergasheva', 'isPrivileged': false},
-        {'firstName': 'Shohruh', 'lastName': 'Rustamov', 'isPrivileged': false},
-        {'firstName': 'Malika', 'lastName': 'Yusupova', 'isPrivileged': true},
-        {'firstName': 'Otabek', 'lastName': 'Hakimov', 'isPrivileged': false},
-      ];
-
-      for (var item in demoData) {
-        final firstName = item['firstName'];
-        final lastName = item['lastName'];
-        final isPriv = item['isPrivileged'];
-
-        final docRef = await _db.collection('students').add({
-          'classId': classId,
-          'firstName': firstName,
-          'lastName': lastName,
-          'name': "$firstName $lastName",
-          'phone': "+998 (90) 123-45-67",
-          'parentPhone': "+998 (91) 987-65-43",
-          'isPrivileged': isPriv,
-          'joinedDate': Timestamp.fromDate(DateTime.now()),
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-
-        final newStudent = {
-          'id': docRef.id,
-          'classId': classId,
-          'firstName': firstName,
-          'lastName': lastName,
-          'name': "$firstName $lastName",
-          'phone': "+998 (90) 123-45-67",
-          'parentPhone': "+998 (91) 987-65-43",
-          'isPrivileged': isPriv,
-        };
-
-        classStudents.add(newStudent);
-      }
-
-      isLoading.value = false;
-      Get.snackbar(
-          "Muvaffaqiyatli",
-          "10 ta demo o'quvchi qo'shildi!",
-          backgroundColor: const Color(0xFF10B981),
-          colorText: Colors.white
-      );
-    } catch (e) {
-      isLoading.value = false;
-      debugPrint("Demo o'quvchi qo'shish xatosi: $e");
-    }
-  }
   @override
   void onClose() {
     studentFirstNameController.dispose();

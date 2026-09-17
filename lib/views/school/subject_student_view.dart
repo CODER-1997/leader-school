@@ -5,10 +5,18 @@ import 'package:intl/intl.dart';
 import 'package:leader_school/views/school/school_exams.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:leader_school/views/school/student_profil/student_profil.dart';
+import '../../controllers/crm_controller.dart';
 import '../../controllers/subject_student_controller.dart';
 import '../../controllers/school/exam_controller.dart';
 import '../../controllers/admin_controller/admin_settings_controller.dart';
 import '../../services/sms_service.dart'; // MUHIM: agar sizda boshqa yo'lda bo'lsa, shu qatorni to'g'irlang
+
+// YANGI (XATO TUZATILDI): "Yangi o'quvchi" endi ALOHIDA SCREEN sifatida
+// ochiladi — quyidagi _showAddStudentBottomSheet shu ekranni chaqiradi.
+// MUHIM: agar add_subject_student_screen.dart faylini boshqa papkaga
+// qo'ysangiz, shu import yo'lini moslang.
+
+import '../../widgets/add_new_student_to_school.dart';
 
 String _capitalizeName(String text) {
   if (text.isEmpty) return '';
@@ -28,17 +36,12 @@ String _studentFullName(Map<String, dynamic> student) {
 
 // =========================================================================
 // YANGI: Davomat tabidagi "tanlash rejimi" holati — AppBar (parent) va
-// o'quvchilar ro'yxati (bola widget) o'rtasida BAHAM KO'RILADI. Shu sababli
-// alohida, kichik GetX controller sifatida chiqarildi — mavjud
-// SubjectStudentsController yoki ExamController ICHIGA HECH NARSA
-// qo'shilmadi, ular butunlay o'zgarishsiz qoldi.
+// o'quvchilar ro'yxati (bola widget) o'rtasida BAHAM KO'RILADI.
 // =========================================================================
 class AttendanceSelectionController extends GetxController {
   var selectionMode = false.obs;
   var selectedIds = <String>{}.obs;
   var isSending = false.obs;
-
-  static const String _testSmsOverrideRecipient = '+998909050317';
 
   void enterSelectionMode(String firstId) {
     selectionMode.value = true;
@@ -55,7 +58,12 @@ class AttendanceSelectionController extends GetxController {
   }
 
   void selectAll(List<String> allIds) {
-    selectedIds.value = allIds.toSet();
+    selectedIds.addAll(allIds);
+    selectionMode.value = true;
+  }
+
+  void selectAbsent(List<String> absentIds) {
+    selectedIds.addAll(absentIds);
     selectionMode.value = true;
   }
 
@@ -64,46 +72,60 @@ class AttendanceSelectionController extends GetxController {
     selectedIds.clear();
   }
 
-  Future<String> _fetchAttendanceTemplate() async {
+  Future<Map<String, String>> _fetchBothAttendanceTemplates() async {
     try {
       final doc = await FirebaseFirestore.instance.collection('settings').doc('sms_templates').get();
-      return doc.data()?['attendance'] ?? AdminSettingsController.defaultAttendanceTemplate;
+      final data = doc.data() ?? {};
+      return {
+        'absent': data['attendance'] ?? AdminSettingsController.defaultAttendanceTemplate,
+        'present': data['attendancePresent'] ?? AdminSettingsController.defaultAttendancePresentTemplate,
+      };
     } catch (e) {
-      return AdminSettingsController.defaultAttendanceTemplate;
+      return {
+        'absent': AdminSettingsController.defaultAttendanceTemplate,
+        'present': AdminSettingsController.defaultAttendancePresentTemplate,
+      };
     }
   }
 
-  /// Tanlangan o'quvchilarning HAR BIRIGA SMS yuboradi.
-  /// SMSService.dart'ga TEGILMAYDI — faqat chaqiradi.
-  Future<void> sendSms({
-    required List<Map<String, dynamic>> students,
+  List<Map<String, dynamic>> _resolveSelected(List<Map<String, dynamic>> allStudents) {
+    return allStudents.where((s) => selectedIds.contains(s['id'])).toList();
+  }
+
+  Future<void> sendAttendanceSms({
+    required List<Map<String, dynamic>> allStudents,
+    required Map<String, bool?> attendanceMap,
     required String subjectName,
   }) async {
-    if (selectedIds.isEmpty || isSending.value) return;
+    final recipients = _resolveSelected(allStudents);
+    if (recipients.isEmpty || isSending.value) return;
     isSending.value = true;
 
-    final template = await _fetchAttendanceTemplate();
+    final templates = await _fetchBothAttendanceTemplates();
     final today = DateFormat('dd.MM.yyyy').format(DateTime.now());
     final smsService = SMSService();
 
     int successCount = 0;
     int failCount = 0;
+    int skippedCount = 0;
 
-    for (final studentId in selectedIds) {
-      final student = students.firstWhereOrNull((s) => s['id'] == studentId);
-      if (student == null) continue;
+    for (final student in recipients) {
+      final studentId = student['id'];
+      final bool? isPresent = attendanceMap[studentId];
+
+      if (isPresent == null) {
+        skippedCount++;
+        continue;
+      }
 
       final fullName = _studentFullName(student);
+      final template = isPresent ? templates['present']! : templates['absent']!;
       final message = template
           .replaceAll('{ism}', fullName)
           .replaceAll('{sinf}', subjectName)
           .replaceAll('{sana}', today);
 
-      // TEST REJIMI: hozircha BARCHA SMS shu raqamga yuboriladi. Test
-      // tugagach, quyidagi qatorni o'chirib, shart bo'yicha
-      // `student['parentPhone']`ni ishlating — u allaqachon shu yerda tayyor.
-      final recipient = _testSmsOverrideRecipient;
-      // final recipient = (student['parentPhone'] ?? '').toString();
+      final recipient = (student['parentPhone'] ?? '').toString();
 
       try {
         await smsService.sendSMS(recipient, message);
@@ -114,15 +136,51 @@ class AttendanceSelectionController extends GetxController {
       }
     }
 
+    _finish(successCount, failCount, skippedCount: skippedCount);
+  }
+
+  Future<void> sendCustomSms({
+    required List<Map<String, dynamic>> allStudents,
+    required String customText,
+  }) async {
+    final recipients = _resolveSelected(allStudents);
+    if (recipients.isEmpty || isSending.value || customText.trim().isEmpty) return;
+    isSending.value = true;
+
+    final smsService = SMSService();
+    int successCount = 0;
+    int failCount = 0;
+
+    for (final student in recipients) {
+      final fullName = _studentFullName(student);
+      final message = customText.replaceAll('{ism}', fullName);
+      final recipient = (student['parentPhone'] ?? '').toString();
+
+      try {
+        await smsService.sendSMS(recipient, message);
+        successCount++;
+      } catch (e) {
+        failCount++;
+        debugPrint("Shaxsiy SMS yuborishda xato ($fullName): $e");
+      }
+    }
+
+    _finish(successCount, failCount);
+  }
+
+  void _finish(int successCount, int failCount, {int skippedCount = 0}) {
     isSending.value = false;
     selectionMode.value = false;
     selectedIds.clear();
 
+    final parts = <String>[];
+    if (successCount > 0) parts.add("$successCount ta yuborildi");
+    if (failCount > 0) parts.add("$failCount ta xato");
+    if (skippedCount > 0) parts.add("$skippedCount ta o'tkazib yuborildi (davomat belgilanmagan)");
+
     Get.snackbar(
       failCount == 0 ? "Yuborildi" : "Qisman yuborildi",
-      failCount == 0
-          ? "$successCount ta SMS muvaffaqiyatli yuborildi"
-          : "$successCount ta yuborildi, $failCount ta xato",
+      parts.isEmpty ? "Hech kimga yuborilmadi" : parts.join(", "),
       backgroundColor: failCount == 0 ? const Color(0xFF10B981) : Colors.orange,
       colorText: Colors.white,
       snackPosition: SnackPosition.TOP,
@@ -131,9 +189,7 @@ class AttendanceSelectionController extends GetxController {
 }
 
 // =========================================================================
-// SOF VIZUAL — hech qanday holat/logika saqlamaydi. Tanlash mantig'i
-// (toggle/enterSelectionMode) faqat qatorning o'zidagi InkWell orqali
-// ishlaydi; bu widget faqat isSelected holatini chizadi.
+// SOF VIZUAL — o'zgarishsiz.
 // =========================================================================
 class _SelectionIndicator extends StatelessWidget {
   final bool isSelected;
@@ -189,7 +245,7 @@ class _SubjectStudentsViewState extends State<SubjectStudentsView> with SingleTi
 
   late SubjectStudentsController _subjectController;
   late ExamController _examController;
-  late AttendanceSelectionController _selectionController; // YANGI
+  late AttendanceSelectionController _selectionController;
 
   @override
   void initState() {
@@ -213,7 +269,6 @@ class _SubjectStudentsViewState extends State<SubjectStudentsView> with SingleTi
     }
     _examController.addRef();
 
-    // YANGI: tanlash controlleri shu ekranga bog'liq (subjectId bo'yicha tag).
     _selectionController = Get.put(AttendanceSelectionController(), tag: widget.subjectId);
   }
 
@@ -225,164 +280,190 @@ class _SubjectStudentsViewState extends State<SubjectStudentsView> with SingleTi
     if (_examController.releaseRef()) {
       Get.delete<ExamController>(tag: widget.classId);
     }
-    Get.delete<AttendanceSelectionController>(tag: widget.subjectId); // YANGI
+    Get.delete<AttendanceSelectionController>(tag: widget.subjectId);
 
     super.dispose();
   }
 
-  void _showAddStudentBottomSheet() {
-    var phoneFormatter = MaskTextInputFormatter(
-      mask: '+998 (##) ###-##-##',
-      filter: { "#": RegExp(r'[0-9]') },
-      type: MaskAutoCompletionType.lazy,
-    );
+  // =======================================================================
+  // YANGI: orqaga chiqishdan OLDIN — saqlanmagan davomat o'zgarishlari
+  // bo'lsa, AVTOMATIK saqlaydi. AppBar orqaga tugmasi VA qurilma tizim
+  // orqaga tugmasi/harakati uchun BIR XIL ishlatiladi.
+  // =======================================================================
+  Future<void> _saveIfNeededAndPop() async {
+    if (_subjectController.hasUnsavedChanges.value) {
+      await _subjectController.saveAttendance();
+    }
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Get.back();
+    }
+  }
 
+  // YANGI (XATO TUZATILDI): bu getter avval YO'Q edi — "Kelmaganlarni
+  // tanlash" tugmasi va audience tanlash varag'i shuni chaqirar edi,
+  // lekin ta'rif yo'qligi sabab "getter isn't defined" xatosi berardi.
+  // Joriy ko'rilayotgan sana (_subjectController.selectedDate) bo'yicha
+  // "Yo'q" deb belgilangan o'quvchilar ro'yxatini qaytaradi.
+  List<String> get _absentStudentIds {
+    return _subjectController.classStudents
+        .where((s) => _subjectController.attendanceMap[s['id']] == false)
+        .map<String>((s) => s['id'] as String)
+        .toList();
+  }
+
+  // YANGI (XATO TUZATILDI): bu metod avval YO'Q edi — pastdagi FAB
+  // (`onPressed: _showAddStudentBottomSheet`) shuni chaqirar edi, lekin
+  // ta'rif yo'qligi sabab "method isn't defined" xatosi berardi. Endi
+  // "Yangi o'quvchi" ALOHIDA SCREEN (AddSubjectStudentScreen) sifatida
+  // ochiladi — bottom sheet emas.
+  void _showAddStudentBottomSheet() {
+    Get.to(() => AddSubjectStudentScreen(
+      subjectName: widget.subjectName,
+      controller: _subjectController,
+    ));
+  }
+
+  void _onLongPressStudent(Map<String, dynamic> student) {
+    _selectionController.enterSelectionMode(student['id']);
+    _showSmsTypeSheet();
+  }
+
+  void _showSmsTypeSheet() {
     Get.bottomSheet(
       Container(
-        padding: EdgeInsets.only(
-          top: 24, left: 24, right: 24,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-        ),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40, height: 4,
-                  decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)),
-                ),
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)))),
+            const SizedBox(height: 20),
+            const Text("SMS turini tanlang", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF0F172A))),
+            const SizedBox(height: 4),
+            Obx(() => Text("${_selectionController.selectedIds.length} ta o'quvchi tanlandi", style: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)))),
+            const SizedBox(height: 16),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFF3B82F6).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.fact_check_rounded, color: Color(0xFF3B82F6)),
               ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    "${widget.subjectName} - Yangi o'quvchi",
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Color(0xFF64748B), size: 20),
-                    onPressed: () => Get.back(),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
+              title: const Text("Davomat haqida SMS", style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text("Tayyor shablon bo'yicha", style: TextStyle(fontSize: 12)),
+              onTap: () async {
+                Get.back();
+                await Future.delayed(const Duration(milliseconds: 150));
+                _pickAudienceForAttendance();
+              },
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFF10B981).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.edit_note_rounded, color: Color(0xFF10B981)),
               ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _subjectController.studentFirstNameController,
-                      decoration: InputDecoration(
-                        labelText: "Ismi", hintText: "Anvar",
-                        filled: true, fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: _subjectController.studentLastNameController,
-                      decoration: InputDecoration(
-                        labelText: "Familiyasi", hintText: "Aliyev",
-                        filled: true, fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _subjectController.studentPhoneController,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [phoneFormatter],
-                decoration: InputDecoration(
-                  labelText: "O'quvchi telefoni", hintText: "+998 (90) 123-45-67",
-                  filled: true, fillColor: const Color(0xFFF8FAFC),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _subjectController.parentPhoneController,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [phoneFormatter],
-                decoration: InputDecoration(
-                  labelText: "Ota-ona telefoni", hintText: "+998 (91) 987-65-43",
-                  filled: true, fillColor: const Color(0xFFF8FAFC),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text("Imtiyozli (To'lovdan ozod)", style: TextStyle(fontWeight: FontWeight.w500, color: Color(0xFF0F172A), fontSize: 14)),
-                    Switch.adaptive(
-                      value: _subjectController.isPrivileged.value,
-                      activeColor: const Color(0xFF10B981),
-                      onChanged: (val) => _subjectController.isPrivileged.value = val,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Obx(() => InkWell(
-                onTap: () => _subjectController.pickJoinedDate(context),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.calendar_today, size: 18, color: Color(0xFF64748B)),
-                      const SizedBox(width: 10),
-                      Text("Kelgan sana: ${DateFormat('dd.MM.yyyy').format(_subjectController.joinedDate.value)}"),
-                    ],
-                  ),
-                ),
-              )),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
-                  onPressed: () => _subjectController.addStudent(),
-                  child: const Text("Saqlash", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                ),
-              ),
-            ],
-          ),
+              title: const Text("Shaxsiy SMS", style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text("O'zingiz matn yozasiz", style: TextStyle(fontSize: 12)),
+              onTap: () async {
+                Get.back();
+                await Future.delayed(const Duration(milliseconds: 150));
+                _showCustomSmsDialog();
+              },
+            ),
+          ],
         ),
       ),
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
     );
   }
 
-  // YANGI: FAB bosilganda — avval tasdiqlash dialogi, faqat "Ha" bosilsa yuboradi.
-  Future<void> _confirmAndSendSms() async {
+  void _pickAudienceForAttendance() {
+    final all = _subjectController.classStudents;
+    final absentIds = _absentStudentIds;
+    final int currentlyChecked = _selectionController.selectedIds.length;
+
+    Get.bottomSheet(
+      Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(2)))),
+            const SizedBox(height: 20),
+            const Text("Kimlarga yuborilsin?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF0F172A))),
+            const SizedBox(height: 4),
+            const Text(
+              "Har bir o'quvchiga o'z holatiga mos matn (kelgan/kelmagan) ketadi.",
+              style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFF8B5CF6).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.checklist_rounded, color: Color(0xFF8B5CF6)),
+              ),
+              title: Text("Faqat tanlanganlarga ($currentlyChecked)", style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text("Belgilagan (✓) o'quvchilaringiz", style: TextStyle(fontSize: 11.5)),
+              onTap: () async {
+                Get.back();
+                await Future.delayed(const Duration(milliseconds: 150));
+                _confirmAndSendAttendanceSms();
+              },
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              enabled: absentIds.isNotEmpty,
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFFDC2626).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.person_off_rounded, color: Color(0xFFDC2626)),
+              ),
+              title: Text(
+                "Faqat kelmaganlarga (${absentIds.length})",
+                style: TextStyle(fontWeight: FontWeight.w600, color: absentIds.isEmpty ? const Color(0xFFCBD5E1) : const Color(0xFF0F172A)),
+              ),
+              subtitle: absentIds.isEmpty ? const Text("Bugun hali belgilanmagan yoki hammasi keldi", style: TextStyle(fontSize: 11.5)) : null,
+              onTap: absentIds.isEmpty
+                  ? null
+                  : () async {
+                Get.back();
+                await Future.delayed(const Duration(milliseconds: 150));
+                _selectionController.selectedIds.value = absentIds.toSet();
+                _confirmAndSendAttendanceSms();
+              },
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFF10B981).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.groups_rounded, color: Color(0xFF10B981)),
+              ),
+              title: Text("Hammaga (${all.length})", style: const TextStyle(fontWeight: FontWeight.w600)),
+              onTap: () async {
+                Get.back();
+                await Future.delayed(const Duration(milliseconds: 150));
+                _selectionController.selectedIds.value = all.map((s) => s['id'] as String).toSet();
+                _confirmAndSendAttendanceSms();
+              },
+            ),
+          ],
+        ),
+      ),
+      isScrollControlled: true,
+    );
+  }
+
+  Future<void> _confirmAndSendAttendanceSms() async {
     final selectedCount = _selectionController.selectedIds.length;
 
     final confirmed = await Get.dialog<bool>(
@@ -475,170 +556,357 @@ class _SubjectStudentsViewState extends State<SubjectStudentsView> with SingleTi
     );
 
     if (confirmed == true) {
-      await _selectionController.sendSms(
-        students: _subjectController.classStudents,
+      await _selectionController.sendAttendanceSms(
+        allStudents: _subjectController.classStudents,
+        attendanceMap: _subjectController.attendanceMap,
         subjectName: widget.subjectName,
       );
     }
   }
 
+  void _showCustomSmsDialog() {
+    final textController = TextEditingController();
+
+    Get.dialog(
+      Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: const Color(0xFF10B981).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                    child: const Icon(Icons.edit_note_rounded, color: Color(0xFF10B981), size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(child: Text("Shaxsiy SMS", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF0F172A)))),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Obx(() => Text(
+                "${_selectionController.selectedIds.length} ta ota-onaga yuboriladi. {ism} yozsangiz, har birining ismi bilan almashadi.",
+                style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8), height: 1.4),
+              )),
+              const SizedBox(height: 16),
+              TextField(
+                controller: textController,
+                maxLines: 5,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: "Masalan: Assalomu alaykum, {ism}ning ertagi darsi bekor qilindi.",
+                  hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13.5),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  contentPadding: const EdgeInsets.all(14),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF10B981), width: 1.5)),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 48,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFE2E8F0)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                        onPressed: () => Get.back(),
+                        child: const Text("Bekor qilish", style: TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0),
+                        onPressed: () {
+                          final text = textController.text.trim();
+                          if (text.isEmpty) {
+                            Get.snackbar("Diqqat", "SMS matnini kiriting", backgroundColor: Colors.orange, colorText: Colors.white);
+                            return;
+                          }
+                          Get.back();
+                          _selectionController.sendCustomSms(allStudents: _subjectController.classStudents, customText: text);
+                        },
+                        icon: const Icon(Icons.send_rounded, size: 17, color: Colors.white),
+                        label: const Text("Yuborish", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // YANGI: kalendar orqali ISTALGAN sanani tanlash.
+  Future<void> _pickAttendanceDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _subjectController.selectedDate.value,
+      firstDate: DateTime(2023),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) {
+      await _subjectController.changeDate(picked);
+    }
+  }
+
+  // YANGI: AppBar action qismidagi ixcham sana navigatsiyasi — kalendar
+  // + chap/o'ng strelkalar, kattaroq teginish maydoni bilan.
+  Widget _buildCompactDateNavRow() {
+    return Obx(() {
+      final date = _subjectController.selectedDate.value;
+      final bool isToday = _subjectController.isViewingToday;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left_rounded, size: 24, color: Color(0xFF64748B)),
+            onPressed: () => _subjectController.goToPreviousDay(),
+            tooltip: "Oldingi kun",
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+          ),
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: _pickAttendanceDate,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.calendar_today_rounded, size: 16, color: Color(0xFF10B981)),
+                  const SizedBox(width: 6),
+                  Text(
+                    isToday ? "Bugun" : DateFormat('dd.MM.yyyy').format(date),
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF334155), fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.chevron_right_rounded, size: 24, color: isToday ? const Color(0xFFE2E8F0) : const Color(0xFF64748B)),
+            onPressed: isToday ? null : () => _subjectController.goToNextDay(),
+            tooltip: "Keyingi kun",
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+          ),
+          const SizedBox(width: 6),
+        ],
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        // YANGI: tanlash rejimida orqaga strelkasi o'rniga "X" (bekor qilish)
-        leading: Obx(() => _selectionController.selectionMode.value
-            ? IconButton(
-          icon: const Icon(Icons.close_rounded, color: Color(0xFF0F172A)),
-          onPressed: _selectionController.cancel,
-        )
-            : const BackButton(color: Color(0xFF0F172A))),
-        title: Obx(() => Text(
-          _selectionController.selectionMode.value
-              ? "${_selectionController.selectedIds.length} ta tanlandi"
-              : "${widget.subjectName} - Boshqaruv",
-          style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-        )),
-        iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: const Color(0xFF10B981),
-          unselectedLabelColor: const Color(0xFF64748B),
-          indicatorColor: const Color(0xFF10B981),
-          indicatorWeight: 3,
-          tabs: const [
-            Tab(text: "Davomat"),
-            Tab(text: "Imtihonlar"),
+    // YANGI: qurilmaning tizim ORQAGA tugmasi/harakati ham AVVAL
+    // saqlaydi, keyin chiqadi.
+    return WillPopScope(
+      onWillPop: () async {
+        if (_subjectController.hasUnsavedChanges.value) {
+          await _subjectController.saveAttendance();
+        }
+        return true;
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF8FAFC),
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          leading: Obx(() => _selectionController.selectionMode.value
+              ? IconButton(
+            icon: const Icon(Icons.close_rounded, color: Color(0xFF0F172A)),
+            onPressed: _selectionController.cancel,
+          )
+              : IconButton(
+            icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF0F172A)),
+            onPressed: _saveIfNeededAndPop,
+          )),
+          title: Obx(() => Text(
+            _selectionController.selectionMode.value
+                ? "${_selectionController.selectedIds.length} ta tanlandi"
+                : "${widget.subjectName} - Boshqaruv",
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+          )),
+          iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
+          bottom: TabBar(
+            controller: _tabController,
+            labelColor: const Color(0xFF10B981),
+            unselectedLabelColor: const Color(0xFF64748B),
+            indicatorColor: const Color(0xFF10B981),
+            indicatorWeight: 3,
+            tabs: const [
+              Tab(text: "Davomat"),
+              Tab(text: "Imtihonlar"),
+            ],
+          ),
+          actions: [
+            Obx(() {
+              if (_selectionController.selectionMode.value) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: "Kelmaganlarni tanlash",
+                      icon: const Icon(Icons.person_off_rounded, color: Color(0xFFDC2626), size: 21),
+                      onPressed: () => _selectionController.selectAbsent(_absentStudentIds),
+                    ),
+                    IconButton(
+                      tooltip: "Hammasini tanlash",
+                      icon: const Icon(Icons.done_all_rounded, color: Color(0xFF10B981)),
+                      onPressed: () => _selectionController.selectAll(
+                        _subjectController.classStudents.map((s) => s['id'] as String).toList(),
+                      ),
+                    ),
+                  ],
+                );
+              }
+              if (_currentTabIndex == 0) {
+                return _buildCompactDateNavRow();
+              }
+              return const SizedBox.shrink();
+            }),
           ],
         ),
-        actions: [
-          Obx(() {
-            // YANGI: tanlash rejimida — "Hammasini tanlash"
-            if (_selectionController.selectionMode.value) {
-              return TextButton.icon(
-                onPressed: () => _selectionController.selectAll(
-                  _subjectController.classStudents.map((s) => s['id'] as String).toList(),
-                ),
-                icon: const Icon(Icons.done_all_rounded, size: 18, color: Color(0xFF10B981)),
-                label: const Text("Hammasini tanlash", style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.w600)),
-              );
-            }
-            // Aks holda — eski "Saqlash" (davomat) tugmasi, o'zgarishsiz
-            return _subjectController.hasUnsavedChanges.value
-                ? Padding(
-              padding: const EdgeInsets.only(right: 12, top: 8, bottom: 8),
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: _subjectController.isSaving.value ? null : () => _subjectController.saveAttendance(),
-                icon: _subjectController.isSaving.value
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.save, size: 18, color: Colors.white),
-                label: const Text("Saqlash", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+
+        floatingActionButton: _currentTabIndex == 0
+            ? Obx(() => _selectionController.selectionMode.value
+            ? const SizedBox.shrink()
+            : FloatingActionButton(
+          backgroundColor: const Color(0xFF10B981),
+          onPressed: _showAddStudentBottomSheet,
+          child: const Icon(Icons.add, color: Colors.white),
+        ))
+            : const SizedBox.shrink(),
+
+        bottomNavigationBar: Obx(() {
+          final bool visible = _currentTabIndex == 0 &&
+              _selectionController.selectionMode.value &&
+              _selectionController.selectedIds.isNotEmpty;
+
+          return AnimatedSize(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.bottomCenter,
+            child: !visible
+                ? const SizedBox(width: double.infinity, height: 0)
+                : Container(
+              padding: EdgeInsets.fromLTRB(20, 14, 20, MediaQuery.of(context).padding.bottom + 14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, -6)),
+                ],
               ),
-            )
-                : const SizedBox.shrink();
-          }),
-        ],
-      ),
+              child: SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    shape: const StadiumBorder(),
+                    elevation: 0,
+                  ),
+                  onPressed: _selectionController.isSending.value ? null : _showSmsTypeSheet,
+                  icon: _selectionController.isSending.value
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.sms_rounded, color: Colors.white),
+                  label: Text(
+                    _selectionController.isSending.value
+                        ? "Yuborilmoqda..."
+                        : "SMS yuborish (${_selectionController.selectedIds.length})",
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15.5),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
 
-      floatingActionButton: _currentTabIndex == 0
-          ? Obx(() => _subjectController.hasUnsavedChanges.value
-          ? const SizedBox.shrink()
-          : FloatingActionButton(
-        backgroundColor: const Color(0xFF10B981),
-        onPressed: () => _subjectController.addDemoStudents(),
-        child: const Icon(Icons.add, color: Colors.white),
-      ))
-          : const SizedBox.shrink(),
-
-      // YANGI: SMS yuborish tugmasi endi FAB emas — pastdan TO'LIQ KENGLIKDA,
-      // ANIMATSIYA bilan "qalqib chiquvchi" panel. Faqat Davomat tabida va
-      // kamida bitta o'quvchi tanlanganda ko'rinadi.
-      bottomNavigationBar: Obx(() {
-        final bool visible = _currentTabIndex == 0 &&
-            _selectionController.selectionMode.value &&
-            _selectionController.selectedIds.isNotEmpty;
-
-        return AnimatedSize(
-          duration: const Duration(milliseconds: 260),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.bottomCenter, // pastdan "o'sib" chiqadi — qalqib chiqish effekti
-          child: !visible
-              ? const SizedBox(width: double.infinity, height: 0)
-              : Container(
-            padding: EdgeInsets.fromLTRB(20, 14, 20, MediaQuery.of(context).padding.bottom + 14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, -6)),
+        body: Stack(
+          children: [
+            TabBarView(
+              controller: _tabController,
+              children: [
+                AttendanceTabScreen(
+                  controller: _subjectController,
+                  subjectId: widget.subjectId,
+                  selectionController: _selectionController,
+                  onLongPressStudent: _onLongPressStudent,
+                ),
+                ExamsTabScreen(
+                  examController: _examController,
+                  studentsController: _subjectController,
+                ),
               ],
             ),
-            child: SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
-                  shape: const StadiumBorder(), // uzunchoq (pill) shakl
-                  elevation: 0,
+            Obx(() {
+              if (!_subjectController.isSaving.value) return const SizedBox.shrink();
+              return Container(
+                color: Colors.black.withOpacity(0.15),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 24, offset: const Offset(0, 8))],
+                    ),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 34,
+                          height: 34,
+                          child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFF10B981)),
+                        ),
+                        SizedBox(height: 16),
+                        Text("Saqlanmoqda...", style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF334155), fontSize: 14.5)),
+                      ],
+                    ),
+                  ),
                 ),
-                onPressed: _selectionController.isSending.value ? null : _confirmAndSendSms,
-                icon: _selectionController.isSending.value
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.sms_rounded, color: Colors.white),
-                label: Text(
-                  _selectionController.isSending.value
-                      ? "Yuborilmoqda..."
-                      : "SMS yuborish (${_selectionController.selectedIds.length})",
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15.5),
-                ),
-              ),
-            ),
-          ),
-        );
-      }),
-
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // 1-OYNA: Davomat
-          AttendanceTabScreen(
-            controller: _subjectController,
-            subjectId: widget.subjectId,
-            selectionController: _selectionController, // YANGI
-          ),
-
-          // 2-OYNA: Imtihonlar
-          ExamsTabScreen(
-              examController: _examController,
-              studentsController: _subjectController
-          ),
-        ],
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
 }
 
 // =========================================================================
-// 1 - OYNA (WIDGET): DAVOMAT TABI
+// 1 - OYNA (WIDGET): DAVOMAT TABI — o'zgarishsiz.
 // =========================================================================
+
+
+
 class AttendanceTabScreen extends StatelessWidget {
   final SubjectStudentsController controller;
   final String subjectId;
-  final AttendanceSelectionController selectionController; // YANGI
+  final AttendanceSelectionController selectionController;
+  final void Function(Map<String, dynamic> student) onLongPressStudent;
 
   const AttendanceTabScreen({
     super.key,
     required this.controller,
     required this.subjectId,
     required this.selectionController,
+    required this.onLongPressStudent,
   });
 
   @override
@@ -654,11 +922,19 @@ class AttendanceTabScreen extends StatelessWidget {
         return const Center(child: Text("O'quvchilar yo'q."));
       }
 
+      // 1. Alifbo bo'yicha to'g'ri saralangan nusxa olish
+      final sortedStudents = List<Map<String, dynamic>>.from(students)..sort((a, b) {
+        final nameA = _studentFullName(a).trim().toLowerCase();
+        final nameB = _studentFullName(b).trim().toLowerCase();
+        return nameA.compareTo(nameB);
+      });
+
       return ListView.builder(
         padding: EdgeInsets.zero,
-        itemCount: students.length,
+        itemCount: sortedStudents.length,
         itemBuilder: (context, index) {
-          final student = students[index];
+          // 2. Elementlarni saralangan ro'yxatdan olish
+          final student = sortedStudents[index];
           final studentId = student['id'];
           final displayName = _studentFullName(student);
           final bool isPrivileged = student['isPrivileged'] == true;
@@ -668,9 +944,12 @@ class AttendanceTabScreen extends StatelessWidget {
             final bool isSelected = selectionController.selectedIds.contains(studentId);
 
             return GestureDetector(
-              // YANGI: istalgan o'quvchini LONG-PRESS qilsa — tanlash rejimi yoqiladi.
               onLongPress: () {
-                if (!inSelectionMode) selectionController.enterSelectionMode(studentId);
+                if (!inSelectionMode) {
+                  onLongPressStudent(student);
+                } else {
+                  selectionController.toggle(studentId);
+                }
               },
               child: InkWell(
                 onTap: inSelectionMode
@@ -692,10 +971,6 @@ class AttendanceTabScreen extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      // YANGI: tanlash rejimida jilolangan doira-belgi, aks
-                      // holda ESKI tartib-raqam/yulduzcha — TOGGLE FUNKSIYASI
-                      // o'zgarishsiz (qatorning o'zi InkWell orqali bosiladi,
-                      // shu yerda faqat vizual ko'rsatkich chizilyapti).
                       SizedBox(
                         width: 40,
                         height: 40,
